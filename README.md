@@ -9,9 +9,11 @@ AI-powered differential diagnosis system that simulates a panel of medical speci
 - **AI Model**: Ollama Cloud (`ollama-cloud/deepseek-v4.1-flash` by default), configured via `OLLAMA_API_KEY`. Other providers are supported — see [Mastra providers](https://mastra.ai/models/providers) for available API key env var names and supported models.
 - **Agents** — 35 medical specialist agents + Chief Medical Officer (CMO). Created via factory pattern in `factory.ts`
 - **Tools** — Medical API integrations:
-  - OpenFDA drug safety & adverse events
+  - Drug interactions via openFDA label text (RxNorm resolves names to RxCUIs; RxNav provides spelling suggestions)
+  - OpenFDA drug safety (labeling, adverse events, recalls, shortages, food/device adverse events, substance toxicology)
+  - Orphadata rare diseases (search, genes, phenotypes)
+  - NLM Clinical Tables (HPO terms, LOINC lab test lookup)
   - ClinicalTrials.gov trial matching
-  - RxNav drug interactions
   - MedlinePlus patient education
 - **Workflows** — Multi-step diagnostic workflow with concurrency control (default: max 1 concurrent specialist call) and retry logic
 - **Progress Store** — SQLite-backed job persistence with pub/sub for real-time WebSocket updates and TTL-based cleanup
@@ -48,8 +50,10 @@ The app runs on `http://localhost:3000` by default.
 | `bun run test:frontend` | Run frontend component tests |
 | `bun run test:e2e` | Run Playwright E2E tests |
 | `bun run test:all` | Run all tests (unit, frontend, and e2e) |
+| `bun run test:contract` | Run API contract tests against live external APIs (`RUN_CONTRACT=1`) |
 | `bun run test:rest-token` | Run REST token integration tests (requires `WS_TOKEN_SECRET`) |
 | `bun run test:ws-ticket` | Run WebSocket ticket integration tests (requires `WS_TOKEN_SECRET`) |
+| `bun run test:rest-tokens` | Run both REST token and WebSocket ticket integration tests |
 
 ## Environment Variables
 
@@ -60,17 +64,19 @@ The app runs on `http://localhost:3000` by default.
 | `SPECIALIST_MODEL` | `ollama-cloud/deepseek-v4.1-flash` | Model for specialist agents. See [Mastra providers](https://mastra.ai/models/providers) for supported models |
 | `ORCHESTRATOR_MODEL` | `ollama-cloud/deepseek-v4.1-flash` | Model for CMO orchestrator. See [Mastra providers](https://mastra.ai/models/providers) for supported models |
 | `MAX_DIAGNOSIS_ROUNDS` | `3` | Max consultation rounds per diagnosis |
-| `RATE_LIMIT_MAX_REQUESTS` | `5` | Max requests per IP per window |
+| `RATE_LIMIT_MAX_REQUESTS` | `10` | Max requests per IP per window |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (1 minute) |
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | Max concurrent diagnostic workflows |
 | `MOCK_LLM` | — | Set to `1` for mock mode (testing) |
 | `ALLOWED_ORIGINS` | `*` | CORS + WebSocket origin whitelist (comma-separated) |
+| `TRUSTED_ORIGINS` | (empty) | Production CORS + WebSocket origin whitelist. When set, `ALLOWED_ORIGINS` is ignored |
+| `WS_TOKEN_SECRET` | (empty) | HMAC secret for WebSocket + REST endpoint authentication. When empty, tokens are not required (dev mode). Set for production |
 | `LOG_FORMAT` | — | Set to `json` for JSON-structured log output |
-| `SPECIALIST_CONTEXT_MODE` | `none` | Agent-to-agent context sharing: `none`, `prior_rounds`, `cmo_curated`, `full` |
+| `SPECIALIST_CONTEXT_MODE` | `prior_rounds` | Agent-to-agent context sharing: `none`, `prior_rounds`, `cmo_curated`, `full` |
 | `SPECIALIST_CONTEXT_MAX_CHARS` | `2000` | Max characters of context injected per specialist call |
 | `CMO_CONTEXT_MAX_CHARS` | `60000` | Max characters of context maintained in CMO history |
 | `AGENT_GENERATE_MAX_RETRIES` | `3` | Max retries for agent generation calls |
-| `MAX_SPECIALIST_CONCURRENCY` | `3` | Max concurrent specialist calls per round |
+| `MAX_SPECIALIST_CONCURRENCY` | `1` | Max concurrent specialist calls per round |
 
 See [`.env.example`](.env.example) for a template.
 
@@ -79,11 +85,11 @@ See [`.env.example`](.env.example) for a template.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/v1/diagnose` | Submit a diagnostic case (validates input size up to 1MB max payload). Returns `202` with `jobId`, `token`, and `wsTicket`. |
-| `GET` | `/v1/status/:jobId` | Poll job status. Send the token via `X-Job-Token: <token>` (query `?token=` accepted as a dev fallback). Response includes `Cache-Control: no-store, private`. |
+| `GET` | `/v1/status/:jobId` | Poll job status. Send the token via `X-Job-Token: <token>` header (query-param fallback was removed). Response includes `Cache-Control: no-store, private`. |
 | `DELETE` | `/v1/diagnose/:jobId` | Cancel a running job. Send the token via `X-Job-Token: <token>`. |
 | `GET` | `/v1/health` | Health check (uptime, active workflows, DB connectivity) |
 | `GET` | `/v1/agents` | List available specialist agents |
-| `GET` | `/ws?jobId=...&ticket=...` | WebSocket for real-time progress streaming. Prefers a short-lived `ticket` (120s TTL) over the long-lived `token` for a bounded migration period. |
+| `GET` | `/ws?jobId=...&ticket=...` | WebSocket for real-time progress streaming. Prefers a short-lived `ticket` (120s TTL); the long-lived `token` is accepted as a fallback because WebSocket upgrades cannot set custom headers. |
 
 ### Capability Transport
 

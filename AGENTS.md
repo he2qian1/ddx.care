@@ -66,7 +66,9 @@ Default to using Bun instead of Node.js. You should NEVER use Python or any Pyth
 
 Key files:
 - `factory.ts` — `createSpecialistAgent()` factory function. Accepts `SpecialistConfig`, assigns model and tools per specialist.
-- `index.ts` — Exports `specialists` record (all 35), `SpecialistId` type, and `agentList` (metadata for `/v1/agents`).
+- `manifest.ts` — Single source of truth for the specialist registry: `specialistManifest` (id, name, description metadata), `SpecialistId` / `SpecialistMetadata` types, `specialistIds`, `specialistMetadataById`, `specialistCatalog`.
+- `index.ts` — Exports the `specialists` record (all 35), re-exports the manifest symbols, and derives `agentList` (metadata for `/v1/agents`).
+- `specialist-integrity.ts` — `validateSpecialistIntegrity()` startup check: verifies the manifest, specialist files, and tool assignments stay in sync (returns the specialist count).
 - `chief-medical-officer.ts` — CMO agent (`chiefMedicalOfficer`) with supervisor instructions for multi-round orchestration.
 
 #### Tools (`src/backend/tools/`)
@@ -74,11 +76,13 @@ Key files:
 Medical API integrations, assigned per-specialist via `getToolsForSpecialist()` in `tools/index.ts`:
 
 - **Drug interactions via FDA labels** (`drug-interaction.ts`): `drugLookupTool`, `drugInteractionTool`, `drugSpellingTool`. Interaction checking matches drug names against openFDA label text (RxNorm resolves names to RxCUIs; spelling suggestions come from RxNav). NLM discontinued its RxNav Drug-Drug Interaction API in January 2024 — there is no free public replacement, which is why label-text matching (with explicit coverage/limitation semantics) is used.
-- **OpenFDA** (`open-fda.ts`): `adverseEventsTool`, `drugLabelingTool`, `drugRecallTool`, `substanceToxicologyTool`
+- **OpenFDA** (`open-fda.ts`): `adverseEventsTool`, `drugLabelingTool`, `drugRecallTool`, `drugShortagesTool`, `foodAdverseEventsTool`, `deviceAdverseEventsTool`, `substanceToxicologyTool`
+- **Orphadata rare diseases** (`orphadata.ts`): `rareDiseaseSearchTool`, `rareDiseaseGenesTool`, `rareDiseasePhenotypesTool`. Backed by a SQLite cache populated at startup by `src/backend/orphadata-cache.ts` (`initializeOrphadataCache()`, controlled by `ORPHADATA_ENABLED` / `ORPHADATA_DB_PATH`).
+- **NLM Clinical Tables** (`nlm-clinical-tables.ts`): `hpoTermSearchTool` (Human Phenotype Ontology terms), `loincTestLookupTool` (LOINC lab test codes)
 - **ClinicalTrials.gov** (`clinical-trials.ts`): `clinicalTrialsSearchTool`
 - **MedlinePlus** (`medlineplus.ts`): `medlinePlusSearchTool`
 
-Tool categories (universal, prescribing, genetics, oncology, toxicology, education, trials, spelling) are composed declaratively per specialist in `toolAssignments`.
+Tool categories (universal, prescribing, rareDisease, toxicology, trials, labPhenotype) are composed declaratively per specialist in `toolAssignments`.
 
 Shared utilities:
 - `tools/utils/fetch.ts` — `fetchJSON()` with timeout, abort controller, and 404 handling.
@@ -90,6 +94,7 @@ Shared utilities:
   - **Report generation**: Uses one initial structured generation and one corrected structured generation. Valid output becomes an `available` outcome; exhausted validation, empty-response, or provider failures become `generation_failed` without fabricated medical content. Cancellation and timeout still propagate as workflow failures.
   - **formatReport**: Converts validated raw diagnosis data into the `available` variant with ranked diagnoses, urgency levels, evidence arrays, generation metadata, and a disclaimer. It passes `generation_failed` through unchanged.
 - Shared runtime schemas and derived types (`DiagnosisReport`, `ReportOutcome`, error codes) live in `src/shared/report-outcome.ts`.
+- `tool-event-hooks.ts` / `tool-result-summary.ts` — Mastra tool-call instrumentation that feeds audit logging (tool name, redacted arg metadata) and compact tool-result summaries for agent context.
 - **Mock mode**: When `MOCK_LLM=1`, `runDiagnosis` returns a canned response without calling real LLMs.
 - Utility exports: `limitConcurrency`, `withRetry`, `splitToList` (also used in tests).
 
@@ -103,6 +108,8 @@ Shared utilities:
   - `generateWsTicket(jobId, ttlSec?, now?)` and `verifyWsTicket(jobId, ticket, now?)` — short-lived (default 120s), stateless WebSocket upgrade ticket. Same `<expiryMs>.<hmacHex>` format but with an independent, shorter TTL so the two capabilities are not interchangeable. Verification is stateless HMAC only — a ticket is replayable multiple times within its TTL (there is no server-side single-use ledger).
   When `WS_TOKEN_SECRET` is empty (dev mode), tokens/tickets are not required for WebSocket connections, REST endpoints (`GET /v1/status/:jobId`, `DELETE /v1/diagnose/:jobId`), or the HTTP polling fallback.
 - `abort-controller-store.ts` — `Map<string, AbortController>` with exported `set`, `get`, `remove` functions. Stores abort controllers for running workflows, enabling cancellation via `DELETE /v1/diagnose/:jobId`.
+- `audit-logger.ts` — `AuditLogger`: persistent JSON Lines audit log (`AUDIT_LOG_PATH`) with size-based rotation (`AUDIT_LOG_MAX_SIZE_MB` × `AUDIT_LOG_MAX_FILES`), time-based purge (`purgeOlderThan`, `AUDIT_LOG_RETENTION_HOURS`), and tool-arg redaction (`AUDIT_LOG_REDACT_TOOL_ARGS`).
+- `errors.ts` — Typed error hierarchy (`APITimeoutError`, `RateLimitError`, etc.) with `isRetriableError()` classification and `sanitizeForContext()` for safe error propagation into agent context.
 
 #### Tool Cache (`src/backend/tools/utils/tool-cache.ts`)
 
@@ -135,9 +142,11 @@ All constants centralized here, read from environment variables with defaults:
 - `DIAGNOSIS_TIMEOUT_MS` (1800s / 30 min), `MAX_DIAGNOSIS_ROUNDS` (3). `validateConfig()` rejects `JOB_TTL_MS` or `PENDING_JOB_TIMEOUT_MS` below `DIAGNOSIS_TIMEOUT_MS`.
 - `RATE_LIMIT_MAX_REQUESTS` (10), `RATE_LIMIT_WINDOW_MS` (60s / 1 min), `MAX_CONCURRENT_WORKFLOWS` (3)
 - `MAX_INPUT_FIELD_LENGTH` (50,000 chars), `MAX_PAYLOAD_BYTES` (1MB)
-- `MOCK_LLM`, `LOG_FORMAT`, `SPECIALIST_CONTEXT_MODE`, `SPECIALIST_CONTEXT_MAX_CHARS`, `CMO_CONTEXT_MAX_CHARS`
+- `MOCK_LLM`, `LOG_FORMAT`, `SPECIALIST_CONTEXT_MODE` (default `prior_rounds`), `SPECIALIST_CONTEXT_MAX_CHARS`, `CMO_CONTEXT_MAX_CHARS`
 - `WS_TOKEN_SECRET` (empty = dev mode, no token required; set for production — secures WebSocket, REST status/cancel endpoints, and HTTP polling fallback)
 - `TOOL_CACHE_TTL_MS` (86400000 / 24h), `TOOL_CACHE_DB_PATH` (`tool-cache.sqlite`), `TOOL_CACHE_CLEANUP_INTERVAL_MS` (10min). Set `TOOL_CACHE_TTL_MS=0` to disable tool API response caching.
+- `AUDIT_LOG_PATH`, `AUDIT_LOG_MAX_SIZE_MB` (10), `AUDIT_LOG_MAX_FILES` (5), `AUDIT_LOG_RETENTION_HOURS` (168h / 7 days), `AUDIT_LOG_REDACT_TOOL_ARGS` (1)
+- `ORPHADATA_ENABLED` (1), `ORPHADATA_DB_PATH` (`orphadata.sqlite`), `DB_PATH` (`jobs.sqlite`)
 
 ### Frontend (`src/frontend/`)
 
@@ -155,20 +164,21 @@ All constants centralized here, read from environment variables with defaults:
 #### Components (`src/frontend/components/`)
 
 - **agents/**: `AgentGrid`, `AgentIcon`, `AgentStatusCard`
-- **diagnosis/**: `ConfidenceBadge`, `ConsultNotes` (with print/export, CSP-hardened print window), `DiagnosisCard`, `UrgencyBadge`
-- **layout/**: `AppShell`, `Footer`, `Header` (with "Differential Diagnosis" label)
+- **diagnosis/**: `ConfidenceBadge`, `ConsultNotes` (with print/export, CSP-hardened print window), `DiagnosisCard`, `ProgressPhases`, `UrgencyBadge`
+- **layout/**: `AppShell`, `ConsentGate` (usage disclaimer gate shown before the app), `Footer`, `Header` (with "Differential Diagnosis" label)
 - **ui/**: `Button`, `Card`, `FileDropZone`, `Spinner`
 
 #### Hooks (`src/frontend/hooks/`)
 
-- `useJobStream` — WebSocket connection with exponential backoff reconnection (5 attempts: 1s → 2s → 4s → 8s → 16s) and pre-reconnect status check via `getJobStatus()`, before HTTP polling fallback. The short-lived `wsTicket` (120s TTL) is used only for the initial WebSocket connection — it is issued in the same submission response, so it is fresh by construction there. Reconnects happen at least 1s later and may outlive the ticket (a stale ticket would collect guaranteed 403s), so they authenticate with the long-lived `token` instead. REST polling always uses `token` via the `X-Job-Token` header.
-- `usePolling` — Interval-based status polling
+- `useJobStream` — WebSocket connection with exponential backoff reconnection (5 attempts: 1s → 2s → 4s → 8s → 16s) and pre-reconnect status check via `getJobStatus()`, before falling back to interval-based HTTP polling (built into the same hook, 3s poll interval). The short-lived `wsTicket` (120s TTL) is used only for the initial WebSocket connection — it is issued in the same submission response, so it is fresh by construction there. Reconnects happen at least 1s later and may outlive the ticket (a stale ticket would collect guaranteed 403s), so they authenticate with the long-lived `token` instead. REST polling always uses `token` via the `X-Job-Token` header.
 - `useAutoLogout` — Inactivity timeout with `timeoutMs` (input screen, default 10 min) and `waitingTimeoutMs` (waiting/results, default 15 min) options. The timer is never paused; it runs on all screens so an unattended terminal screen triggers the sensitive-session purge. The `screen` option selects which timeout applies. User activity (mousemove, keydown, click, scroll, touchstart) resets the timer.
 - `useRouter` — Hash-based client-side routing. `navigate()` uses `replaceState` when navigating between capability-bearing routes (waiting → results, results → waiting) so credential URLs don't accumulate in browser history. Navigating from a clean route (input) to a capability route uses `pushState` so the user can go back to the clean input page. Callers can override via `{ replace: boolean }`.
 
 #### Other Frontend Files
 
 - `components/layout/Header.tsx` — Persistent light/dark mode toggle
+- `job-context.ts` — Job context reducer and storage: keeps per-job (`jobId`, `token`, `wsTicket`, status, result) contexts across the waiting → results flow (persisted to `sessionStorage`, expiry-aware).
+- `job-credentials.ts` — Job credential storage/retrieval helpers used by the context and the purge flow.
 - `api/client.ts` — API client functions (`submitDiagnosis`, `getJobStatus`, `getAgents`, `cancelDiagnosis`). `getJobStatus` and `cancelDiagnosis` send the job token via an `X-Job-Token` header (not in the URL), leaving `Authorization` available for Caddy's HTTP Basic credentials. Completed status responses are runtime-validated with the shared `reportOutcomeSchema`.
 - `api/types.ts` — Frontend API types (`DiagnoseRequest`, `StatusResponse`, `WsMessage`, etc.). `DiagnosisReport` and `ReportOutcome` are re-exported from the shared schema module rather than duplicated.
 - `types/speech.d.ts` — Ambient type declarations for `SpeechRecognition`, `SpeechRecognitionEvent`, etc.
@@ -181,7 +191,7 @@ Entry point. Creates the `Bun.serve()` instance with:
 - `POST /v1/diagnose` — Submit a diagnostic case. Validates input (Zod schema, payload size limit), checks rate limit (per-IP + concurrent workflow cap), starts async workflow, returns `202 Accepted` with `jobId`, `token`, and `wsTicket`.
 - `GET /v1/status/:jobId` — Poll job status and progress events. A completed response contains a direct `result: ReportOutcome`; there is no nested workflow-result wrapper. Requires an `X-Job-Token: <token>` header when `WS_TOKEN_SECRET` is set (403 on missing/invalid token); the legacy `?token=` query-parameter fallback was removed (the frontend is header-only). Token is verified before job existence lookup to prevent enumeration (ordering: format check 400 → token check 403 → existence 404). The 200 response includes `Cache-Control: no-store, private` so shared and intermediary caches do not retain PHI-bearing payloads.
 - `DELETE /v1/diagnose/:jobId` — Cancel a running diagnostic workflow. Requires an `X-Job-Token: <token>` header when `WS_TOKEN_SECRET` is set (403 on missing/invalid token). Aborts the workflow's `AbortController` and marks the job as `failed("Cancelled by user")`; the workflow keeps its concurrent slot until its promise settles.
-- `GET /v1/health` — Health check endpoint (uptime, active workflows, SQLite connectivity).
+- `GET /v1/health` — Health check endpoint (uptime, active workflows, SQLite connectivity, tool-cache stats).
 - `GET /v1/agents` — List available specialist agents (id, name, description).
 - `GET /ws?jobId=...&ticket=...` — WebSocket for real-time progress streaming. Completion messages are `{ type: "completed", jobId, result: ReportOutcome }`. Validates `Origin` header against `TRUSTED_ORIGINS` (or `ALLOWED_ORIGINS` when not set). When `WS_TOKEN_SECRET` is set, prefers a short-lived `ticket` parameter (120s TTL, replayable within its TTL — verification is stateless) and also accepts the long-lived `token` parameter; rejects expired/invalid credentials with 403. The `token` fallback is retained intentionally: WebSocket upgrade requests cannot set custom headers, so unlike the REST endpoints (which are header-only via `X-Job-Token`) there is no header transport available — the query parameter is the only option. Replays history on connect, subscribes to live updates.
 - `OPTIONS /v1/*` — CORS preflight catch-all.
@@ -210,10 +220,11 @@ Entry point. Creates the `Bun.serve()` instance with:
 - Stops accepting new connections, clears cleanup intervals, waits for in-flight workflows (30s timeout), then exits.
 
 **Background tasks**:
-- Job cleanup interval (every 5 minutes, removes jobs older than 60 minutes)
+- Job cleanup interval (every 5 minutes, scrubs and removes terminal jobs older than `JOB_TTL_MS`; also fails expired pending jobs via `timeoutPending`)
 - Rate limiter prune interval (every 10 minutes)
 - Tool cache cleanup interval (every 10 minutes, removes entries older than `TOOL_CACHE_TTL_MS`)
-- `progressStore.markStalePending()` on startup marks all pending jobs as failed
+- Audit log purge timer (at most hourly, purges entries older than `AUDIT_LOG_RETENTION_HOURS`)
+- On startup: `validateSpecialistIntegrity()` verifies the specialist registry, `progressStore.markStalePending()` marks all pending jobs as failed, `initializeOrphadataCache()` populates the rare-disease cache (when `ORPHADATA_ENABLED`), and `initToolCache()` opens/migrates the tool cache.
 
 ### Environment Variables
 
@@ -222,7 +233,7 @@ Entry point. Creates the `Bun.serve()` instance with:
 | `OLLAMA_API_KEY` | *required* | LLM provider API key. Env var name varies by provider — see [Mastra providers](https://mastra.ai/models/providers) |
 | `PORT` | `3000` | Server port |
 | `ALLOWED_ORIGINS` | `*` | CORS + WebSocket origin whitelist (comma-separated, used when `TRUSTED_ORIGINS` is not set) |
-| `TRUSTED_ORIGNS` | (empty) | Production CORS + WebSocket origin whitelist (comma-separated). When set, `ALLOWED_ORIGINS` is ignored |
+| `TRUSTED_ORIGINS` | (empty) | Production CORS + WebSocket origin whitelist (comma-separated). When set, `ALLOWED_ORIGINS` is ignored |
 | `WS_TOKEN_SECRET` | (empty) | HMAC secret for WebSocket + REST endpoint authentication. When empty, tokens are not required (dev mode). Set for production — secures WebSocket (short-lived ticket + long-lived token fallback), `GET /v1/status/:jobId`, `DELETE /v1/diagnose/:jobId` (via `X-Job-Token`), and HTTP polling fallback. |
 | `JOB_TTL_MS` | `3600000` (60 min) | Terminal-job (completed/failed) TTL before scrub + delete. Must be >= `DIAGNOSIS_TIMEOUT_MS`. Pending jobs are not affected; see `PENDING_JOB_TIMEOUT_MS`. |
 | `PENDING_JOB_TIMEOUT_MS` | `1920000` (32 min) | Max lifetime of a pending job before it is aborted and failed (`Diagnosis timed out`). Defaults to `DIAGNOSIS_TIMEOUT_MS + 120000`. Must be >= `DIAGNOSIS_TIMEOUT_MS`. |
@@ -234,7 +245,7 @@ Entry point. Creates the `Bun.serve()` instance with:
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | Max concurrent diagnostic workflows |
 | `MOCK_LLM` | — | Set to `1` for mock mode (testing) |
 | `LOG_FORMAT` | — | Set to `json` for JSON-structured log output |
-| `SPECIALIST_CONTEXT_MODE` | `none` | Agent-to-agent context sharing: `none`, `prior_rounds`, `cmo_curated`, `full` |
+| `SPECIALIST_CONTEXT_MODE` | `prior_rounds` | Agent-to-agent context sharing: `none`, `prior_rounds`, `cmo_curated`, `full` |
 | `SPECIALIST_CONTEXT_MAX_CHARS` | `2000` | Max characters of context injected per specialist call |
 | `CMO_CONTEXT_MAX_CHARS` | `60000` | Max characters of context maintained in CMO history |
 | `AUDIT_LOG_PATH` | — | Path to persistent audit log file (e.g., `./logs/audit.log`). When set, all log events are appended as JSON Lines. |
@@ -250,6 +261,7 @@ Entry point. Creates the `Bun.serve()` instance with:
 | `AGENT_GENERATE_RETRY_BASE_DELAY` | `1000` | Base delay in ms between agent generation retries |
 | `DIAGNOSIS_TIMEOUT_MS` | `1800000` (30 min) | Diagnosis workflow timeout |
 | `DB_PATH` | `jobs.sqlite` | Path to SQLite job database |
+| `ORPHADATA_ENABLED` | `1` (enabled) | Set to `0` to skip populating the Orphadata rare-disease cache at startup |
 | `ORPHADATA_DB_PATH` | `orphadata.sqlite` | Path to SQLite Orphadata cache database |
 
 ## PHI Data Retention
@@ -316,7 +328,7 @@ These files start a server with `WS_TOKEN_SECRET` set and must run separately fr
 - `job-context.spec.ts` — Frontend job context isolation (refresh, expiry, back/forward navigation)
 - `error-states.spec.ts` — Error states & edge paths (deep-link, agent-list failure, cancel, retry, report-generation failure)
 - `inactivity-purge.spec.ts` — Inactivity session purge (unattended results/waiting/input screens, back navigation, autosave disclosure, activity reset). Uses Playwright's `page.clock` to fast-forward through the extended timeout.
-- Runs on port 3999 with `MOCK_LLM=1` (configured in `playwright.config.ts`)
+- Runs on port 3999 with `MOCK_LLM=1` (plus relaxed rate limits, `WS_TOKEN_SECRET=e2e-job-context-secret`, and `ORPHADATA_ENABLED=0`; configured in `playwright.config.ts`)
 - Covers: input submission, real-time progress updates, report rendering, print/export
 
 ## Key Dependencies
@@ -326,7 +338,7 @@ These files start a server with `WS_TOKEN_SECRET` set and must run separately fr
 - `react` / `react-dom` (^19.2.7) — UI
 - `zod` (^4.4.3) — Input validation schemas
 - `marked` (^17.0.6) — Markdown rendering
-- `isomorphic-dompurify` (^3.8.0) — HTML sanitization
+- `isomorphic-dompurify` (^3.18.0) — HTML sanitization
 - `@heroicons/react` (^2.2.0) — Icon library
 
 ### Dev
