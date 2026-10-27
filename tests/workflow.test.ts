@@ -1371,6 +1371,105 @@ describe("runDiagnosis - CMO parsing logic", () => {
     }
   });
 
+  test("failed specialist can be re-consulted in a later round", async () => {
+    let cmoCallCount = 0;
+    let cardioAvailable = false;
+    let cardioCalls = 0;
+    let cardioSuccesses = 0;
+    const cmoPrompts: string[] = [];
+    const finalReport = {
+      chiefComplaint: "Headache",
+      patientSummary: "Test",
+      specialistsConsulted: [
+        { specialist: "cardiologist", keyFindings: "Recovered consult" },
+      ],
+      rankedDiagnoses: [
+        {
+          diagnosisName: "Test",
+          confidencePercentage: 50,
+          urgency: "Routine",
+          rationale: "Test",
+          supportingEvidence: "",
+          contradictoryEvidence: "",
+          suggestedNextSteps: "",
+        },
+      ],
+      crossSpecialtyObservations: "",
+      recommendedImmediateActions: "",
+    };
+    const mockCmoGenerate = mock(async (prompt: string) => {
+      cmoPrompts.push(prompt);
+      cmoCallCount++;
+      if (cmoCallCount === 1) {
+        return {
+          object: {
+            specialistsToConsult: [{ id: "cardiologist" }],
+            isFinal: false,
+          },
+        };
+      }
+      if (cmoCallCount === 2) {
+        // The round-1 outage clears; CMO asks for cardiology again.
+        cardioAvailable = true;
+        return {
+          object: {
+            specialistsToConsult: [{ id: "cardiologist" }],
+            isFinal: false,
+          },
+        };
+      }
+      return {
+        object: {
+          specialistsToConsult: [],
+          isFinal: true,
+          finalReport,
+        },
+      };
+    });
+
+    const mockMastra = {
+      getAgent: (id: string) => {
+        if (id === "chiefMedicalOfficer") {
+          return { generate: mockCmoGenerate };
+        }
+        if (id === "cardiologist") {
+          return {
+            generate: mock(async () => {
+              cardioCalls++;
+              if (!cardioAvailable) {
+                throw new Error("Specialist unavailable");
+              }
+              cardioSuccesses++;
+              return { text: "Cardiology analysis" };
+            }),
+          };
+        }
+        return undefined;
+      },
+    };
+
+    const result = await runDiagnosis.execute({
+      context: {} as any,
+      stepId: "run-diagnosis",
+      workflowId: "test-wf",
+      inputData: {
+        medicalHistory: "",
+        conversationTranscript: "",
+        labResults: "",
+      },
+      mastra: mockMastra as any,
+      runId: "specialist-retry-round2-id",
+    });
+
+    expect(result.status).toBe("available");
+    // Round 1 failed (after its in-round retries); round 2 was not filtered
+    // out and the re-consult succeeded exactly once.
+    expect(cardioCalls).toBeGreaterThan(1);
+    expect(cardioSuccesses).toBe(1);
+    // The round-2 CMO prompt must not list the failed specialist as consulted.
+    expect(cmoPrompts[1]).toContain("Specialists consulted so far: None");
+  });
+
   test("falls back to max-rounds final report when CMO never returns isFinal", async () => {
     let round = 0;
     const mockCmoGenerate = mock(async () => {

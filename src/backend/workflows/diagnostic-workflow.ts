@@ -1025,7 +1025,6 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
             try {
               const specAgent = mastra.getAgent(specId);
               if (specAgent) {
-                allConsultedSpecialists.add(specId);
                 emit("specialist_start", `Calling specialist ${specId}...`, {
                   agentId: specId,
                 });
@@ -1081,6 +1080,11 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
                   Date.now() - specStart,
                   true,
                 );
+                // Mark consulted only after a successful response, so a
+                // failed call does not blacklist the specialty for later
+                // rounds (filter above and the CMO prompt both read this
+                // set as "successfully consulted").
+                allConsultedSpecialists.add(specId);
 
                 emit(
                   "specialist_complete",
