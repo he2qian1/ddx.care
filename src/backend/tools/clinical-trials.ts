@@ -26,7 +26,7 @@ interface CtDesignModule {
   phases?: string[];
   studyType?: string;
   interventions?: Array<{ name?: string }>;
-  enrollmentInfo?: { enrollmentCount?: string };
+  enrollmentInfo?: { count?: number; type?: string };
 }
 
 interface CtConditionsModule {
@@ -149,9 +149,7 @@ export const clinicalTrialsSearchTool = createTool({
           sponsor: sponsorModule.leadSponsor?.name ?? undefined,
           startDate: statusModule.startDateStruct?.date ?? undefined,
           completionDate: statusModule.completionDateStruct?.date ?? undefined,
-          enrollment: designModule.enrollmentInfo?.enrollmentCount
-            ? parseInt(designModule.enrollmentInfo.enrollmentCount, 10)
-            : undefined,
+          enrollment: designModule.enrollmentInfo?.count ?? undefined,
           briefSummary: descriptionModule.briefSummary ?? undefined,
         };
       });

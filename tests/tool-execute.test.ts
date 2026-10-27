@@ -960,6 +960,46 @@ describe("clinical-trials tool execute", () => {
     expect(result.data.results[0].status).toBe("RECRUITING");
   });
 
+  test("clinicalTrialsSearchTool populates enrollment from enrollmentInfo.count", async () => {
+    const { clinicalTrialsSearchTool } = await import(
+      "../src/backend/tools/clinical-trials"
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        studies: [
+          {
+            protocolSection: {
+              identificationModule: {
+                nctId: "NCT002",
+                briefTitle: "Trial 2",
+              },
+              statusModule: { overallStatus: "RECRUITING" },
+              designModule: {
+                phases: ["Phase 3"],
+                studyType: "Interventional",
+                enrollmentInfo: { count: 1736, type: "ACTUAL" },
+              },
+              conditionsModule: { conditions: ["Diabetes"] },
+            },
+          },
+        ],
+        totalCount: 1,
+      }),
+    }) as any;
+
+    const result = await clinicalTrialsSearchTool.execute({
+      query: "diabetes",
+      status: "RECRUITING",
+      pageSize: 5,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`Tool failed: ${result.error}`);
+    expect(result.data.results[0].enrollment).toBe(1736);
+  });
+
   test("clinicalTrialsSearchTool handles empty results", async () => {
     const { clinicalTrialsSearchTool } = await import(
       "../src/backend/tools/clinical-trials"
