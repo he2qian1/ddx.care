@@ -63,6 +63,17 @@ export interface JobEntry {
   progress: ProgressEvent[];
 }
 
+/**
+ * SINGLE-PROCESS ASSUMPTION: a JobStore instance is only coherent as the
+ * sole process serving its database file. Job rows live in the shared
+ * SQLite file, but live delivery (this EventTarget), the per-job progress
+ * counts below, and the workflow cancel handles (abort-controller-store)
+ * are all in-process state. A second process sharing the same DB file
+ * would not receive this process's live events, could not cancel its
+ * workflows, would hold stale progress counts — and its startup
+ * markStalePending() would fail this process's pending jobs. Run exactly
+ * one server process per jobs database.
+ */
 export class JobStore extends EventTarget {
   private db: Database;
   private insertStmt!: Statement;
@@ -72,8 +83,11 @@ export class JobStore extends EventTarget {
   private failStmt!: Statement;
   private scrubStmt!: Statement;
   private cleanupStmt!: Statement;
-  private countProgressStmt!: Statement;
   private replaceProgressStmt!: Statement;
+  /** Stored progress-event count per job, kept in memory so emitMessage
+   * does not need a json_array_length scan of the whole array per event.
+   * Seeded from the DB on job creation or first emit for the job. */
+  private progressCounts = new Map<string, number>();
 
   constructor(dbPath = process.env.DB_PATH || "jobs.sqlite") {
     super();
@@ -115,9 +129,6 @@ export class JobStore extends EventTarget {
     this.cleanupStmt = this.db.prepare(
       `DELETE FROM jobs WHERE status IN ('completed', 'failed') AND createdAt < ?`,
     );
-    this.countProgressStmt = this.db.prepare(
-      `SELECT json_array_length(progress) as count FROM jobs WHERE id = ?`,
-    );
     this.replaceProgressStmt = this.db.prepare(
       `UPDATE jobs SET progress = ? WHERE id = ?`,
     );
@@ -125,6 +136,7 @@ export class JobStore extends EventTarget {
 
   createJob(jobId: string): void {
     this.insertStmt.run(jobId, "pending", Date.now(), "[]");
+    this.progressCounts.set(jobId, 0);
   }
 
   getJob(jobId: string): JobEntry | undefined {
@@ -167,7 +179,9 @@ export class JobStore extends EventTarget {
       typeof messageOrEvent === "string"
         ? { time: new Date().toISOString(), message: messageOrEvent }
         : messageOrEvent;
+    const count = this.progressCount(jobId);
     this.emitStmt.run(JSON.stringify(event), jobId);
+    this.progressCounts.set(jobId, count + 1);
     this.trimProgressIfLarge(jobId);
 
     this.dispatchEvent(
@@ -177,13 +191,32 @@ export class JobStore extends EventTarget {
     );
   }
 
+  /**
+   * Stored event count for a job. Jobs this process did not create (e.g.
+   * rows already in a reopened database file) are seeded once from the
+   * stored array; afterwards the count is maintained purely in memory.
+   */
+  private progressCount(jobId: string): number {
+    let count = this.progressCounts.get(jobId);
+    if (count === undefined) {
+      count = 0;
+      const job = this.getStmt.get(jobId) as JobRow | null;
+      if (job) {
+        try {
+          const events = JSON.parse(job.progress);
+          if (Array.isArray(events)) count = events.length;
+        } catch {
+          // Unparseable progress counts as empty, matching getJob.
+        }
+      }
+      this.progressCounts.set(jobId, count);
+    }
+    return count;
+  }
+
   /** Occasionally trim the stored progress array to its most recent events. */
   private trimProgressIfLarge(jobId: string): void {
-    const row = this.countProgressStmt.get(jobId) as
-      | { count: number | null }
-      | undefined;
-    const count = row?.count;
-    if (typeof count !== "number" || count <= PROGRESS_TRIM_THRESHOLD) return;
+    if (this.progressCount(jobId) <= PROGRESS_TRIM_THRESHOLD) return;
 
     const job = this.getStmt.get(jobId) as JobRow | null;
     if (!job) return;
@@ -193,6 +226,7 @@ export class JobStore extends EventTarget {
         return;
       const trimmed = events.slice(events.length - MAX_PROGRESS_EVENTS);
       this.replaceProgressStmt.run(JSON.stringify(trimmed), jobId);
+      this.progressCounts.set(jobId, trimmed.length);
     } catch {
       // Leave the array untouched if it cannot be parsed.
     }
@@ -258,8 +292,14 @@ export class JobStore extends EventTarget {
 
   cleanupExpired(ttlMs: number): void {
     const cutoff = Date.now() - ttlMs;
+    const expiring = this.db
+      .prepare(
+        `SELECT id FROM jobs WHERE status IN ('completed', 'failed') AND createdAt < ?`,
+      )
+      .all(cutoff) as { id: string }[];
     this.scrubStmt.run(cutoff);
     this.cleanupStmt.run(cutoff);
+    for (const { id } of expiring) this.progressCounts.delete(id);
   }
 
   /**
@@ -299,4 +339,6 @@ export class JobStore extends EventTarget {
   }
 }
 
+// Singleton — see the SINGLE-PROCESS ASSUMPTION on JobStore above: exactly
+// one server process may serve a given jobs database.
 export const progressStore = new JobStore();
