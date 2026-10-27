@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobStore, type ProgressEvent } from "../src/backend/progress-store";
-import * as abortStore from "../src/backend/utils/abort-controller-store";
+import { abortControllers as abortStore } from "../src/backend/progress-store";
 import {
   createGenerationFailedReportOutcome,
   type AvailableReportOutcome,
@@ -659,7 +659,7 @@ describe("JobStore — timeoutPending", () => {
     expect(job!.status).toBe("failed");
     expect(job!.error).toBe("Diagnosis timed out");
 
-    abortStore.remove("stuck-job");
+    abortStore.delete("stuck-job");
   });
 
   test("does not affect pending jobs within the timeout", () => {

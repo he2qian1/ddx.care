@@ -1,11 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { fetchJSON } from "./utils/fetch";
-import {
-  APITimeoutError,
-  RateLimitError,
-  PermanentAPIError,
-} from "../utils/errors";
+import { toErrorResult } from "./utils/types";
 
 const NLM_BASE = "https://clinicaltables.nlm.nih.gov/api";
 
@@ -14,17 +10,6 @@ interface NlmResponse {
   1: string[];
   2: null;
   3: string[][];
-}
-
-function classifyError(error: unknown): { error: string; retriable: boolean } {
-  if (error instanceof APITimeoutError)
-    return { error: error.message, retriable: true };
-  if (error instanceof RateLimitError)
-    return { error: error.message, retriable: true };
-  if (error instanceof PermanentAPIError)
-    return { error: error.message, retriable: false };
-  if (error instanceof Error) return { error: error.message, retriable: true };
-  return { error: String(error), retriable: true };
 }
 
 export const hpoTermSearchTool = createTool({
@@ -91,7 +76,7 @@ export const hpoTermSearchTool = createTool({
 
       return { ok: true as const, data: { results, totalAvailable: data[0] } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `HPO term search failed: ${classified.error}`,
@@ -169,7 +154,7 @@ export const loincTestLookupTool = createTool({
 
       return { ok: true as const, data: { results, totalAvailable: data[0] } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `LOINC test lookup failed: ${classified.error}`,

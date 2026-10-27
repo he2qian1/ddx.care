@@ -2,8 +2,7 @@ import { Card } from "../ui/Card";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { useMemo } from "react";
-import { marked } from "marked";
-import DOMPurify from "isomorphic-dompurify";
+import { renderMarkdown } from "../../markdown";
 import type { Diagnosis } from "../../api/types";
 
 interface DiagnosisCardProps {
@@ -21,10 +20,7 @@ export function DiagnosisCard({ diagnosis }: DiagnosisCardProps) {
     rankBadgeColors[diagnosis.rank] || "bg-slate-300 text-slate-700";
 
   const rationaleHtml = useMemo(
-    () =>
-      diagnosis.rationale
-        ? DOMPurify.sanitize(marked.parse(diagnosis.rationale) as string)
-        : "",
+    () => (diagnosis.rationale ? renderMarkdown(diagnosis.rationale) : ""),
     [diagnosis.rationale],
   );
 

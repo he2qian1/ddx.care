@@ -7,7 +7,7 @@ function truncateSummary(text: string): string {
   return `${text.slice(0, MAX_SUMMARY_LENGTH - 1)}…`;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;

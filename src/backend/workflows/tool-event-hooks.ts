@@ -10,6 +10,7 @@ import { getErrorTypeName } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { formatToolArgs } from "./diagnostic-workflow";
 import {
+  asRecord,
   normalizeToolResult,
   summarizeToolResult,
 } from "./tool-result-summary";
@@ -19,12 +20,6 @@ type EmitFn = (
   message: string,
   extra?: Partial<ProgressEvent>,
 ) => void;
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
 
 function getToolCallId(context: unknown, toolName: string): string {
   const toolCallId = asRecord(context)?.toolCallId;

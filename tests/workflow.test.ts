@@ -19,7 +19,7 @@ import { reportOutcomeSchema } from "../src/shared/report-outcome";
 import { summarizeToolResult } from "../src/backend/workflows/tool-result-summary";
 import { createToolEventHooks } from "../src/backend/workflows/tool-event-hooks";
 import type { ProgressEvent } from "../src/backend/progress-store";
-import * as abortStore from "../src/backend/utils/abort-controller-store";
+import { abortControllers as abortStore } from "../src/backend/progress-store";
 import {
   APITimeoutError,
   SchemaValidationError,
@@ -2181,7 +2181,7 @@ describe("runDiagnosis - abort store integration", () => {
     }
   });
 
-  test("uses AbortController from abort-controller-store when available", async () => {
+  test("uses AbortController from abortControllers when available", async () => {
     const storeAc = new AbortController();
     const runId = "abort-store-test-" + crypto.randomUUID();
     abortStore.set(runId, storeAc);
@@ -2240,7 +2240,7 @@ describe("runDiagnosis - abort store integration", () => {
     expect(capturedSignal).toBe(storeAc.signal);
 
     // Cleanup
-    abortStore.remove(runId);
+    abortStore.delete(runId);
   });
 
   test("falls back to local AbortController when store has no entry", async () => {
@@ -2342,7 +2342,7 @@ describe("runDiagnosis - abort store integration", () => {
     expect(generateCallCount).toBe(1);
 
     // Cleanup
-    abortStore.remove(runId);
+    abortStore.delete(runId);
   });
 });
 

@@ -2,7 +2,6 @@ import {
   CheckIcon,
   ArrowPathIcon,
   DocumentTextIcon,
-  MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
 import type { ProgressEvent } from "../../api/types";
 

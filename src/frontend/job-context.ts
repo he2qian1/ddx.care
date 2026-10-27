@@ -48,7 +48,7 @@ export type JobContextAction =
   | { type: "remove"; jobId: string }
   | { type: "clear" };
 
-function isTerminal(status: StatusResponse | null): boolean {
+export function isTerminal(status: StatusResponse | null): boolean {
   return status?.status === "completed" || status?.status === "failed";
 }
 

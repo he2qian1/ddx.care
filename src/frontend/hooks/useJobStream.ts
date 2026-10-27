@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { getJobStatus } from "../api/client";
 import type { StatusResponse, WsMessage } from "../api/types";
+import { isTerminal } from "../job-context";
 import { reportOutcomeSchema } from "../../shared/report-outcome";
 
 type StatusHandler = (status: StatusResponse, generation: number) => void;
 type ErrorHandler = (error: Error | null, generation: number) => void;
-
-function isTerminal(status: StatusResponse | null): boolean {
-  return status?.status === "completed" || status?.status === "failed";
-}
 
 export function useJobStream(
   jobId: string | null,

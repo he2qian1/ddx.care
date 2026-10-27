@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { mastra } from "../index";
 import { agentList } from "../agents/index";
-import { progressStore } from "../progress-store";
+import { abortControllers, progressStore } from "../progress-store";
 import { RateLimiter } from "../utils/rate-limiter";
 import { logger } from "../utils/logger";
 import {
@@ -10,7 +10,6 @@ import {
   verifyToken,
   verifyWsTicket,
 } from "../utils/ws-token";
-import * as abortStore from "../utils/abort-controller-store";
 import { getCacheStats } from "../tools/utils/tool-cache";
 import { TOOL_CACHE_ENABLED } from "../config";
 import { reportOutcomeSchema } from "../../shared/report-outcome";
@@ -139,16 +138,10 @@ interface RouteJobStore {
   healthCheck(): boolean;
 }
 
-interface RouteAbortStore {
-  set(jobId: string, controller: AbortController): void;
-  get(jobId: string): AbortController | undefined;
-  remove(jobId: string): void;
-}
-
 export interface RouteDependencies {
   rateLimiter?: RateLimiter;
   progressStore?: RouteJobStore;
-  abortStore?: RouteAbortStore;
+  abortStore?: Map<string, AbortController>;
   createWorkflowRun?: (jobId: string) => Promise<WorkflowRun>;
   generateJobId?: () => string;
 }
@@ -165,7 +158,7 @@ export function createRoutes(
 ) {
   const routeRateLimiter = dependencies.rateLimiter ?? rateLimiter;
   const routeProgressStore = dependencies.progressStore ?? progressStore;
-  const routeAbortStore = dependencies.abortStore ?? abortStore;
+  const routeAbortStore = dependencies.abortStore ?? abortControllers;
   const createWorkflowRun =
     dependencies.createWorkflowRun ??
     (async (jobId: string) => {
@@ -351,7 +344,7 @@ export function createRoutes(
             })
             .finally(() => {
               try {
-                routeAbortStore.remove(jobId);
+                routeAbortStore.delete(jobId);
               } finally {
                 routeRateLimiter.finishWorkflow(jobId);
               }
@@ -367,7 +360,7 @@ export function createRoutes(
           logger.workflowFail(jobId, Date.now() - startTime, message);
           if (controllerRegistered) {
             try {
-              routeAbortStore.remove(jobId);
+              routeAbortStore.delete(jobId);
             } catch (cleanupError) {
               logger.error("workflow_controller_cleanup_failed", {
                 jobId,

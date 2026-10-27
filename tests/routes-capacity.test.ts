@@ -55,19 +55,7 @@ function createJobStore(createError?: Error) {
 }
 
 function createAbortStore() {
-  const controllers = new Map<string, AbortController>();
-  return {
-    controllers,
-    set(jobId: string, controller: AbortController) {
-      controllers.set(jobId, controller);
-    },
-    get(jobId: string) {
-      return controllers.get(jobId);
-    },
-    remove(jobId: string) {
-      controllers.delete(jobId);
-    },
-  };
+  return new Map<string, AbortController>();
 }
 
 function createHarness(
@@ -134,7 +122,7 @@ describe("Diagnosis startup capacity compensation", () => {
     expect(response.status).toBe(500);
     expect(limiter.activeWorkflows).toBe(0);
     expect(jobs.jobs.size).toBe(0);
-    expect(aborts.controllers.size).toBe(0);
+    expect(aborts.size).toBe(0);
   });
 
   test("fails the initialized job when run creation throws", async () => {
@@ -159,7 +147,7 @@ describe("Diagnosis startup capacity compensation", () => {
       status: "failed",
       error: "Diagnosis workflow failed to start",
     });
-    expect(aborts.controllers.size).toBe(0);
+    expect(aborts.size).toBe(0);
   });
 
   test("removes the controller and fails the job when start throws", async () => {
@@ -186,7 +174,7 @@ describe("Diagnosis startup capacity compensation", () => {
       status: "failed",
       error: "Diagnosis workflow failed to start",
     });
-    expect(aborts.controllers.size).toBe(0);
+    expect(aborts.size).toBe(0);
   });
 });
 
@@ -216,7 +204,7 @@ describe("Settlement-aware workflow capacity", () => {
       status: "cancelled",
     });
     expect(limiter.activeWorkflows).toBe(1);
-    expect(aborts.controllers.get(firstJobId)?.signal.aborted).toBe(true);
+    expect(aborts.get(firstJobId)?.signal.aborted).toBe(true);
 
     expect(await (await routes.delete(firstJobId)).json()).toEqual({
       status: "cancelled",
@@ -228,7 +216,7 @@ describe("Settlement-aware workflow capacity", () => {
     await Bun.sleep(0);
 
     expect(limiter.activeWorkflows).toBe(0);
-    expect(aborts.controllers.has(firstJobId)).toBe(false);
+    expect(aborts.has(firstJobId)).toBe(false);
     expect(jobs.getJob(firstJobId)?.error).toBe("Cancelled by user");
   });
 
@@ -335,8 +323,8 @@ describe("Cancellation race during workflow startup", () => {
         await startup.promise;
         return {
           start: async () => {
-            signalAtStart = aborts.controllers.get(jobId)?.signal;
-            controllerAtDelete = aborts.controllers.get(jobId);
+            signalAtStart = aborts.get(jobId)?.signal;
+            controllerAtDelete = aborts.get(jobId);
           },
         };
       },
@@ -355,7 +343,7 @@ describe("Cancellation race during workflow startup", () => {
 
     // The controller must already be registered at DELETE time — the abort
     // must reach the workflow, not be a no-op on a missing controller.
-    const controllerDuringStartup = aborts.controllers.get(jobId);
+    const controllerDuringStartup = aborts.get(jobId);
     expect(controllerDuringStartup).toBeDefined();
     expect(controllerDuringStartup?.signal.aborted).toBe(true);
 

@@ -18,51 +18,21 @@ export class AppError extends Error {
     public readonly cause?: Error,
   ) {
     super(message);
-    this.name = "AppError";
+    this.name = new.target.name;
   }
 }
 
-export class RetriableError extends AppError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "RetriableError";
-  }
-}
+export class RetriableError extends AppError {}
 
-export class LLMTimeoutError extends RetriableError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "LLMTimeoutError";
-  }
-}
+export class LLMTimeoutError extends RetriableError {}
 
-export class APITimeoutError extends RetriableError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "APITimeoutError";
-  }
-}
+export class APITimeoutError extends RetriableError {}
 
-export class RateLimitError extends RetriableError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "RateLimitError";
-  }
-}
+export class RateLimitError extends RetriableError {}
 
-export class NonRetriableError extends AppError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "NonRetriableError";
-  }
-}
+export class NonRetriableError extends AppError {}
 
-export class SchemaValidationError extends NonRetriableError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-    this.name = "SchemaValidationError";
-  }
-}
+export class SchemaValidationError extends NonRetriableError {}
 
 export class PermanentAPIError extends NonRetriableError {
   constructor(
@@ -71,7 +41,6 @@ export class PermanentAPIError extends NonRetriableError {
     cause?: Error,
   ) {
     super(message, cause);
-    this.name = "PermanentAPIError";
   }
 }
 
@@ -82,7 +51,6 @@ export class ToolError extends AppError {
     cause?: Error,
   ) {
     super(message, cause);
-    this.name = "ToolError";
   }
 }
 

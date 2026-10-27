@@ -1,11 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import {
-  APITimeoutError,
-  RateLimitError,
-  PermanentAPIError,
-} from "../utils/errors";
 import { fetchText } from "./utils/fetch";
+import { toErrorResult } from "./utils/types";
 
 const MEDLINE_BASE = "https://wsearch.nlm.nih.gov/ws/query";
 
@@ -139,19 +135,11 @@ export const medlinePlusSearchTool = createTool({
         retriable: false,
       };
     } catch (error: unknown) {
-      if (error instanceof APITimeoutError) {
-        return { ok: false as const, error: error.message, retriable: true };
-      }
-      if (error instanceof RateLimitError) {
-        return { ok: false as const, error: error.message, retriable: true };
-      }
-      if (error instanceof PermanentAPIError) {
-        return { ok: false as const, error: error.message, retriable: false };
-      }
+      const classified = toErrorResult(error);
       return {
         ok: false as const,
-        error: error instanceof Error ? error.message : String(error),
-        retriable: true,
+        error: classified.error,
+        retriable: classified.retriable,
       };
     }
   },

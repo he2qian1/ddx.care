@@ -1,7 +1,6 @@
-import type {
-  ProgressEventType,
-  ToolResultStatus,
-} from "../../backend/progress-store";
+import type { ProgressEvent } from "../../backend/progress-store";
+
+export type { ProgressEvent } from "../../backend/progress-store";
 import type {
   DiagnosisReport,
   ReportOutcome,
@@ -37,23 +36,6 @@ export interface ToolHistoryEntry {
   status: ToolStatus;
   durationMs?: number;
   resultSummary?: string | null;
-}
-
-export interface ProgressEvent {
-  time: string;
-  message: string;
-  eventType?: ProgressEventType;
-  agentId?: string;
-  toolCallId?: string;
-  toolName?: string;
-  toolArgs?: string | null;
-  success?: boolean;
-  toolResultStatus?: ToolResultStatus;
-  retriable?: boolean;
-  durationMs?: number;
-  resultSummary?: string | null;
-  errorType?: string;
-  specialistIds?: string[];
 }
 
 export interface StatusResponse {

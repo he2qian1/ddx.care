@@ -1,11 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { fetchJSON as baseFetchJSON } from "./utils/fetch";
-import {
-  APITimeoutError,
-  RateLimitError,
-  PermanentAPIError,
-} from "../utils/errors";
+import { toErrorResult } from "./utils/types";
 
 interface CtStudyIdentification {
   nctId?: string;
@@ -164,21 +160,12 @@ export const clinicalTrialsSearchTool = createTool({
         },
       };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      let retriable: boolean;
-      if (error instanceof APITimeoutError || error instanceof RateLimitError) {
-        retriable = true;
-      } else if (error instanceof PermanentAPIError) {
-        retriable = false;
-      } else {
-        retriable = true;
-      }
+      const classified = toErrorResult(error);
 
       return {
         ok: false as const,
-        error: `ClinicalTrials.gov search failed: ${message}`,
-        retriable,
+        error: `ClinicalTrials.gov search failed: ${classified.error}`,
+        retriable: classified.retriable,
       };
     }
   },

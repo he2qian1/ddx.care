@@ -13,12 +13,12 @@ import {
   CMO_CONTEXT_MAX_CHARS,
 } from "../config";
 import {
+  abortControllers,
   progressStore,
   type ProgressEvent,
   type ProgressEventType,
 } from "../progress-store";
 import { logger } from "../utils/logger";
-import * as abortStore from "../utils/abort-controller-store";
 import { agentList, specialistIds, type SpecialistId } from "../agents";
 import { createToolEventHooks } from "./tool-event-hooks";
 import {
@@ -31,11 +31,10 @@ import {
   createGenerationFailedReportOutcome,
   generationFailedReportOutcomeSchema,
   reportOutcomeSchema,
-  reportSchema,
   type ReportGenerationErrorCode,
 } from "../../shared/report-outcome";
 
-export { reportOutcomeSchema, reportSchema } from "../../shared/report-outcome";
+export { reportOutcomeSchema } from "../../shared/report-outcome";
 
 const specialistNameMap = new Map<string, string>();
 for (const agent of agentList) {
@@ -808,7 +807,7 @@ export const runDiagnosis = createStep({
     // Use the AbortController from the store (set by the route handler) so
     // that DELETE /v1/diagnose/:jobId can actually cancel the running workflow.
     // Falls back to a local controller if no entry exists (e.g. tests).
-    const storedAc = runId ? abortStore.get(runId) : undefined;
+    const storedAc = runId ? abortControllers.get(runId) : undefined;
     const abortController = storedAc ?? new AbortController();
 
     const runLoop = async () => {

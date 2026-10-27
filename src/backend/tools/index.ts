@@ -1,40 +1,6 @@
 import type { ToolsInput } from "@mastra/core/agent";
 import type { SpecialistId } from "../agents/manifest";
 
-// Drug interactions (RxNav)
-export {
-  drugLookupTool,
-  drugInteractionTool,
-  drugSpellingTool,
-} from "./drug-interaction";
-
-// FDA drug safety (OpenFDA)
-export {
-  adverseEventsTool,
-  drugLabelingTool,
-  drugRecallTool,
-  substanceToxicologyTool,
-  drugShortagesTool,
-  foodAdverseEventsTool,
-  deviceAdverseEventsTool,
-} from "./open-fda";
-
-// Clinical trials
-export { clinicalTrialsSearchTool } from "./clinical-trials";
-
-// MedlinePlus health info
-export { medlinePlusSearchTool } from "./medlineplus";
-
-// Orphadata rare diseases
-export {
-  rareDiseaseSearchTool,
-  rareDiseaseGenesTool,
-  rareDiseasePhenotypesTool,
-} from "./orphadata";
-
-// NLM Clinical Tables (HPO + LOINC)
-export { hpoTermSearchTool, loincTestLookupTool } from "./nlm-clinical-tables";
-
 // --- Tool Categories ---
 
 import {

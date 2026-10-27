@@ -1,11 +1,17 @@
 import { Database, type Statement } from "bun:sqlite";
 import { logger } from "./utils/logger";
-import * as abortStore from "./utils/abort-controller-store";
 import {
   reportOutcomeSchema,
   type ReportOutcome,
 } from "../shared/report-outcome";
 import type { SpecialistId } from "./agents/manifest";
+
+/**
+ * Abort controllers for running workflows, keyed by job ID. Shared by the
+ * routes (registration/cancellation), the workflow (adoption), and this
+ * store's pending-job timeout.
+ */
+export const abortControllers = new Map<string, AbortController>();
 
 export type ProgressEventType =
   | "round_start"
@@ -264,7 +270,7 @@ export class JobStore extends EventTarget {
 
   /**
    * Find pending jobs whose `createdAt` exceeds `timeoutMs`, abort their
-   * workflow (if still running) via `abortStore`, and mark them failed with
+   * workflow (if still running) via `abortControllers`, and mark them failed with
    * "Diagnosis timed out". Replaces silent TTL deletion for active work so
    * capacity, status, and cancellation remain consistent.
    */
@@ -275,7 +281,7 @@ export class JobStore extends EventTarget {
     );
     const rows = stmt.all(cutoff) as { id: string }[];
     for (const { id } of rows) {
-      const controller = abortStore.get(id);
+      const controller = abortControllers.get(id);
       if (controller) {
         try {
           controller.abort();

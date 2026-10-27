@@ -1,11 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { fetchJSON as baseFetchJSON } from "./utils/fetch";
-import {
-  APITimeoutError,
-  RateLimitError,
-  PermanentAPIError,
-} from "../utils/errors";
+import { toErrorResult } from "./utils/types";
 
 interface FdaAdverseEventReport {
   safetyreportid?: string;
@@ -139,18 +135,6 @@ async function fetchJSON(url: string) {
   return baseFetchJSON(url, { errorPrefix: "OpenFDA API", ignore404: true });
 }
 
-/** Classify a caught error for ToolResult retriable flag */
-function classifyError(error: unknown): { error: string; retriable: boolean } {
-  if (error instanceof APITimeoutError)
-    return { error: error.message, retriable: true };
-  if (error instanceof RateLimitError)
-    return { error: error.message, retriable: true };
-  if (error instanceof PermanentAPIError)
-    return { error: error.message, retriable: false };
-  if (error instanceof Error) return { error: error.message, retriable: true };
-  return { error: String(error), retriable: true };
-}
-
 /**
  * Search for drug adverse event reports from FDA FAERS database.
  */
@@ -264,7 +248,7 @@ export const adverseEventsTool = createTool({
 
       return { ok: true as const, data: { results, meta } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA adverse events search failed: ${classified.error}`,
@@ -385,7 +369,7 @@ export const drugLabelingTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA drug labeling search failed: ${classified.error}`,
@@ -464,7 +448,7 @@ export const drugRecallTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA drug recall search failed: ${classified.error}`,
@@ -550,7 +534,7 @@ export const substanceToxicologyTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA substance toxicology search failed: ${classified.error}`,
@@ -639,7 +623,7 @@ export const drugShortagesTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA drug shortage search failed: ${classified.error}`,
@@ -732,7 +716,7 @@ export const foodAdverseEventsTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA food adverse events search failed: ${classified.error}`,
@@ -824,7 +808,7 @@ export const deviceAdverseEventsTool = createTool({
 
       return { ok: true as const, data: { results } };
     } catch (e) {
-      const classified = classifyError(e);
+      const classified = toErrorResult(e);
       return {
         ok: false as const,
         error: `FDA device adverse events search failed: ${classified.error}`,

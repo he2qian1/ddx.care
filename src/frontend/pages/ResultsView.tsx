@@ -8,8 +8,7 @@ import {
 import { Button } from "../components/ui/Button";
 import { DiagnosisCard } from "../components/diagnosis/DiagnosisCard";
 import { ConsultNotes } from "../components/diagnosis/ConsultNotes";
-import { marked } from "marked";
-import DOMPurify from "isomorphic-dompurify";
+import { renderMarkdown } from "../markdown";
 import type { AvailableReportOutcome, StatusResponse } from "../api/types";
 
 interface ResultsViewProps {
@@ -115,12 +114,6 @@ function AvailableResultsView({
 
   const report = outcome.report;
   const generatedAt = outcome.generatedAt;
-
-  const renderMarkdown = useCallback(
-    (text: string) =>
-      DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
-    [],
-  );
 
   const crossSpecialtyHtml = useMemo(
     () =>
