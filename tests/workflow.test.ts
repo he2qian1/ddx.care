@@ -976,15 +976,30 @@ describe("buildCmoContext", () => {
     expect(result).not.toContain("omitted");
   });
 
-  test("always preserves at least the first 2 entries even if they exceed max chars", () => {
+  test("truncates an oversize patient summary so output never exceeds max chars", () => {
     const history = [
       "=== PATIENT CASE ===",
       "Very long patient data " + "X".repeat(10000),
       "Round 1",
     ];
     const result = buildCmoContext(history, 100);
+    expect(result.length).toBeLessThanOrEqual(100);
     expect(result).toContain("=== PATIENT CASE ===");
     expect(result).toContain("Very long patient data");
+    expect(result).toContain("[Context truncated due to length limit]");
+  });
+
+  test("caps a max-size patient summary at the default CMO limit", () => {
+    const summary = buildPatientSummary({
+      medicalHistory: "H".repeat(50000),
+      conversationTranscript: "T".repeat(50000),
+      labResults: "L".repeat(50000),
+    });
+    expect(summary.length).toBeGreaterThan(60000);
+    const history = ["=== PATIENT CASE ===", summary];
+    const result = buildCmoContext(history, 60000);
+    expect(result.length).toBeLessThanOrEqual(60000);
+    expect(result).toContain("[Context truncated due to length limit]");
   });
 });
 

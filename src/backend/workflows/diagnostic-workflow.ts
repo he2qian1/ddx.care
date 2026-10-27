@@ -327,18 +327,38 @@ export function buildCmoContext(
   maxChars: number,
 ): string {
   const fullContext = contextHistory.join("\n\n");
-  if (fullContext.length <= maxChars || contextHistory.length <= 2) {
+  if (fullContext.length <= maxChars) {
     return fullContext;
   }
 
-  const baseContext = [contextHistory[0], contextHistory[1]];
+  const truncationMarker = "\n\n[Context truncated due to length limit]";
+
+  // The cap applies to the base context itself: an oversize patient summary
+  // (entry [1]) is truncated with a marker instead of being returned whole.
+  // When the base alone exceeds the cap there is no room for any rounds.
+  const baseContext = [contextHistory[0] ?? "", contextHistory[1] ?? ""];
+  if (baseContext.join("\n\n").length > maxChars) {
+    const headerLength =
+      baseContext[0].length > 0 ? baseContext[0].length + 2 : 0;
+    const summaryBudget = Math.max(
+      0,
+      maxChars - headerLength - truncationMarker.length,
+    );
+    const truncatedSummary = baseContext[1].slice(0, summaryBudget);
+    return (
+      (headerLength > 0 ? `${baseContext[0]}\n\n` : "") +
+      truncatedSummary +
+      truncationMarker
+    ).slice(0, maxChars);
+  }
+
   let currentLength = baseContext.join("\n\n").length;
 
   const recentRounds: string[] = [];
   for (let i = contextHistory.length - 1; i >= 2; i--) {
     const entry = contextHistory[i];
-    const addedLength = entry.length + (recentRounds.length > 0 ? 2 : 0);
-    if (currentLength + addedLength > maxChars && recentRounds.length > 0) {
+    const addedLength = entry.length + 2;
+    if (currentLength + addedLength > maxChars) {
       break;
     }
     recentRounds.unshift(entry);
@@ -351,7 +371,16 @@ export function buildCmoContext(
     );
   }
 
-  return [...baseContext, ...recentRounds].join("\n\n");
+  const result = [...baseContext, ...recentRounds].join("\n\n");
+  if (result.length <= maxChars) {
+    return result;
+  }
+  // The omission notice is not counted in currentLength; hard-cap the result
+  // so the output never exceeds maxChars.
+  if (maxChars <= truncationMarker.length) {
+    return result.slice(0, maxChars);
+  }
+  return result.slice(0, maxChars - truncationMarker.length) + truncationMarker;
 }
 
 /** Mock diagnosis for E2E testing — returns a realistic canned response */
