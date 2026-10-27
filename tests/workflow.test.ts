@@ -849,15 +849,50 @@ describe("buildSpecialistContext", () => {
     ).toBe("");
   });
 
-  test("returns prior context when available in prior_rounds mode", () => {
+  test("returns empty when no prior rounds exist in prior_rounds mode", () => {
+    // History holds only the case header + patient summary; the summary is
+    // appended to the prompt separately, so there is nothing to share yet.
     const result = buildSpecialistContext({
       mode: "prior_rounds",
       specId: "cardiologist",
       contextHistory: ["=== PATIENT CASE ===", "Patient data"],
       maxChars: 2000,
     });
+    expect(result).toBe("");
+  });
+
+  test("delivers round-1 findings when the patient summary exceeds maxChars", () => {
+    // Regression (finding #6): the summary used to head the prior-results
+    // block and eat the whole cap, so round 2+ saw zero prior findings.
+    const result = buildSpecialistContext({
+      mode: "prior_rounds",
+      specId: "nephrologist",
+      contextHistory: [
+        "=== PATIENT CASE ===",
+        `SUMMARY_MARKER ${"x".repeat(3000)}`,
+        "=== Results from Round 1 ===\n\n=== cardiologist Consult ===\nROUND1_FINDING: BP 180/110, hypertensive urgency",
+      ],
+      maxChars: 2000,
+    });
     expect(result).toContain("Prior Consultation Results");
-    expect(result).toContain("Patient data");
+    expect(result).toContain("ROUND1_FINDING");
+    expect(result).not.toContain("SUMMARY_MARKER");
+  });
+
+  test("keeps the most recent rounds when prior results exceed maxChars", () => {
+    const result = buildSpecialistContext({
+      mode: "prior_rounds",
+      specId: "nephrologist",
+      contextHistory: [
+        "=== PATIENT CASE ===",
+        "45yo male with headache",
+        `=== Results from Round 1 ===\n\nROUND1_OLD ${"y".repeat(2100)}`,
+        "=== Results from Round 2 ===\n\nROUND2_RECENT: renal cause likely",
+      ],
+      maxChars: 2000,
+    });
+    expect(result).toContain("ROUND2_RECENT");
+    expect(result).not.toContain("ROUND1_OLD");
   });
 
   test("includes prior round results in prior_rounds mode", () => {

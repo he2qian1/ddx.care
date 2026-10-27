@@ -289,23 +289,35 @@ export function buildSpecialistContext(params: {
 
   const parts: string[] = [];
 
-  if (mode === "prior_rounds" || mode === "full") {
-    if (contextHistory.length > 1) {
-      parts.push(
-        "=== Prior Consultation Results ===\n" +
-          contextHistory.slice(1).join("\n\n"),
-      );
+  // contextHistory[0] is the "=== PATIENT CASE ===" header and [1] is the
+  // patient summary, which the specialist prompt appends separately — prior
+  // results start at index 2. Keep the most recent rounds that fit the cap
+  // (same selection pattern as buildCmoContext).
+  const priorResultsPart = (): string | null => {
+    const header = "=== Prior Consultation Results ===\n";
+    const recentRounds: string[] = [];
+    let currentLength = header.length;
+    for (let i = contextHistory.length - 1; i >= 2; i--) {
+      const entry = contextHistory[i];
+      const addedLength = entry.length + (recentRounds.length > 0 ? 2 : 0);
+      if (currentLength + addedLength > maxChars && recentRounds.length > 0) {
+        break;
+      }
+      recentRounds.unshift(entry);
+      currentLength += addedLength;
     }
+    return recentRounds.length > 0 ? header + recentRounds.join("\n\n") : null;
+  };
+
+  if (mode === "prior_rounds" || mode === "full") {
+    const priorResults = priorResultsPart();
+    if (priorResults) parts.push(priorResults);
   }
 
   if (mode === "cmo_curated" && contextDirective) {
     parts.push(`=== CMO Context Directive ===\n${contextDirective}`);
-    if (contextHistory.length > 1) {
-      parts.push(
-        "=== Prior Consultation Results ===\n" +
-          contextHistory.slice(1).join("\n\n"),
-      );
-    }
+    const priorResults = priorResultsPart();
+    if (priorResults) parts.push(priorResults);
   }
 
   if (mode === "full" && contextDirective) {
