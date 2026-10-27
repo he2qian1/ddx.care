@@ -211,7 +211,7 @@ describe("rareDiseaseGenesTool", () => {
     expect(result.data.message).toContain("99999");
   });
 
-  test("returns noResults for uncached disease when fetch fails", async () => {
+  test("returns retriable failure for uncached disease when fetch fails", async () => {
     setupMocks();
     const { initializeOrphadataCache } = await import(
       "../src/backend/orphadata-cache"
@@ -224,13 +224,14 @@ describe("rareDiseaseGenesTool", () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     const result = await rareDiseaseGenesTool.execute({ orphacode: 12345 });
-    // The cache layer swallows fetch errors and returns [], so the tool
-    // surfaces this as a noResults success rather than a failure.
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("Expected success result");
-    expect(result.data.results).toEqual([]);
-    expect(result.data.noResults).toBe(true);
-    expect(result.data.message).toContain("12345");
+    // Corrected behavior (finding #4): the cache layer throws a ToolError on
+    // fetch failure, so the tool surfaces a retriable failure — not a
+    // noResults success that would read as a confident "no genes" answer.
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected failure result");
+    expect(result.retriable).toBe(true);
+    expect(result.error).toContain("Failed to fetch gene data");
+    expect(result.error).toContain("Network error");
   });
 });
 
@@ -273,7 +274,7 @@ describe("rareDiseasePhenotypesTool", () => {
     expect(result.data.message).toContain("99999");
   });
 
-  test("returns noResults for uncached disease when fetch fails", async () => {
+  test("returns retriable failure for uncached disease when fetch fails", async () => {
     setupMocks();
     const { initializeOrphadataCache } = await import(
       "../src/backend/orphadata-cache"
@@ -288,12 +289,13 @@ describe("rareDiseasePhenotypesTool", () => {
     const result = await rareDiseasePhenotypesTool.execute({
       orphacode: 12345,
     });
-    // The cache layer swallows fetch errors and returns [], so the tool
-    // surfaces this as a noResults success rather than a failure.
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("Expected success result");
-    expect(result.data.results).toEqual([]);
-    expect(result.data.noResults).toBe(true);
-    expect(result.data.message).toContain("12345");
+    // Corrected behavior (finding #4): the cache layer throws a ToolError on
+    // fetch failure, so the tool surfaces a retriable failure — not a
+    // noResults success that would read as a confident "no phenotypes" answer.
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected failure result");
+    expect(result.retriable).toBe(true);
+    expect(result.error).toContain("Failed to fetch phenotype data");
+    expect(result.error).toContain("Network error");
   });
 });

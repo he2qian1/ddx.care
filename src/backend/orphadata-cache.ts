@@ -34,8 +34,15 @@ let searchDiseasesStmt: Statement;
 let insertDiseaseStmt: Statement;
 let getGenesStmt: Statement;
 let insertGeneStmt: Statement;
+let deleteGeneSentinelStmt: Statement;
 let getPhenotypesStmt: Statement;
 let insertPhenotypeStmt: Statement;
+let deletePhenotypeSentinelStmt: Statement;
+
+// Negative ("no data") cache entries expire after 30 days: a disease with no
+// genes/phenotypes today may gain some later, so a stale sentinel is treated
+// as a miss and re-fetched instead of being served forever.
+const NEGATIVE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function initTables() {
   db = new Database(getDbPath(), { create: true });
@@ -54,6 +61,7 @@ function initTables() {
       gene_name TEXT NOT NULL,
       association_type TEXT NOT NULL,
       source TEXT,
+      fetched_at INTEGER,
       PRIMARY KEY (orphacode, gene_symbol)
     );
     CREATE INDEX IF NOT EXISTS idx_genes_orphacode ON orphadata_genes (orphacode);
@@ -63,10 +71,23 @@ function initTables() {
       hpo_id TEXT NOT NULL,
       phenotype_name TEXT NOT NULL,
       frequency TEXT,
+      fetched_at INTEGER,
       PRIMARY KEY (orphacode, hpo_id)
     );
     CREATE INDEX IF NOT EXISTS idx_phenotypes_orphacode ON orphadata_phenotypes (orphacode);
   `);
+
+  // Migration for pre-existing databases: add fetched_at where missing.
+  // Legacy sentinel rows get NULL, which the read path treats as expired,
+  // so they are re-fetched once and rewritten with a real timestamp.
+  for (const table of ["orphadata_genes", "orphadata_phenotypes"]) {
+    const columns = db
+      .query(`SELECT name FROM pragma_table_info('${table}')`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "fetched_at")) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN fetched_at INTEGER`);
+    }
+  }
 
   searchDiseasesStmt = db.prepare(
     `SELECT orphacode, name FROM orphadata_diseases WHERE name LIKE ? ESCAPE '\\' LIMIT ?`,
@@ -75,16 +96,22 @@ function initTables() {
     `INSERT OR REPLACE INTO orphadata_diseases (orphacode, name) VALUES (?, ?)`,
   );
   getGenesStmt = db.prepare(
-    `SELECT gene_symbol, gene_name, association_type, source FROM orphadata_genes WHERE orphacode = ?`,
+    `SELECT gene_symbol, gene_name, association_type, source, fetched_at FROM orphadata_genes WHERE orphacode = ?`,
   );
   insertGeneStmt = db.prepare(
-    `INSERT OR REPLACE INTO orphadata_genes (orphacode, gene_symbol, gene_name, association_type, source) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO orphadata_genes (orphacode, gene_symbol, gene_name, association_type, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  deleteGeneSentinelStmt = db.prepare(
+    `DELETE FROM orphadata_genes WHERE orphacode = ? AND gene_symbol = ?`,
   );
   getPhenotypesStmt = db.prepare(
-    `SELECT hpo_id, phenotype_name, frequency FROM orphadata_phenotypes WHERE orphacode = ?`,
+    `SELECT hpo_id, phenotype_name, frequency, fetched_at FROM orphadata_phenotypes WHERE orphacode = ?`,
   );
   insertPhenotypeStmt = db.prepare(
-    `INSERT OR REPLACE INTO orphadata_phenotypes (orphacode, hpo_id, phenotype_name, frequency) VALUES (?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO orphadata_phenotypes (orphacode, hpo_id, phenotype_name, frequency, fetched_at) VALUES (?, ?, ?, ?, ?)`,
+  );
+  deletePhenotypeSentinelStmt = db.prepare(
+    `DELETE FROM orphadata_phenotypes WHERE orphacode = ? AND hpo_id = ?`,
   );
 }
 
@@ -138,6 +165,11 @@ async function fetchDiseases(): Promise<number> {
 // negative-cache signal.
 const NEGATIVE_CACHE_MARKER = "";
 
+/** A sentinel row is only trusted within the TTL; legacy rows (NULL) are stale. */
+function isFreshSentinel(fetchedAt: number | null): boolean {
+  return fetchedAt !== null && Date.now() - fetchedAt < NEGATIVE_CACHE_TTL_MS;
+}
+
 function mapGeneRows(
   rows: Array<{
     gene_symbol: string;
@@ -170,8 +202,16 @@ async function fetchAndCacheGenes(orphacode: number): Promise<number> {
 
   const associations = data?.data?.results?.DisorderGeneAssociation;
   if (!associations || associations.length === 0) {
-    // Negative cache: an empty result is still a result.
-    insertGeneStmt.run(orphacode, NEGATIVE_CACHE_MARKER, "", "", null);
+    // Negative cache: an empty result is still a result. Stamp it so the
+    // read path can expire it after NEGATIVE_CACHE_TTL_MS.
+    insertGeneStmt.run(
+      orphacode,
+      NEGATIVE_CACHE_MARKER,
+      "",
+      "",
+      null,
+      Date.now(),
+    );
     return 0;
   }
 
@@ -195,6 +235,7 @@ async function fetchAndCacheGenes(orphacode: number): Promise<number> {
           item.name,
           item.type,
           item.source,
+          null,
         );
       }
     },
@@ -229,8 +270,15 @@ async function fetchAndCachePhenotypes(orphacode: number): Promise<number> {
 
   const associations = data?.data?.results?.Disorder?.HPODisorderAssociation;
   if (!associations || associations.length === 0) {
-    // Negative cache: an empty result is still a result.
-    insertPhenotypeStmt.run(orphacode, NEGATIVE_CACHE_MARKER, "", null);
+    // Negative cache: an empty result is still a result. Stamp it so the
+    // read path can expire it after NEGATIVE_CACHE_TTL_MS.
+    insertPhenotypeStmt.run(
+      orphacode,
+      NEGATIVE_CACHE_MARKER,
+      "",
+      null,
+      Date.now(),
+    );
     return 0;
   }
 
@@ -252,6 +300,7 @@ async function fetchAndCachePhenotypes(orphacode: number): Promise<number> {
           item.hpoId,
           item.name,
           item.frequency,
+          null,
         );
       }
     },
@@ -325,6 +374,7 @@ export async function getDiseaseGenes(orphacode: number): Promise<
       gene_name: string;
       association_type: string;
       source: string | null;
+      fetched_at: number | null;
     }>;
 
   // Single read on the cached path: the raw row count (including a sentinel
@@ -332,13 +382,32 @@ export async function getDiseaseGenes(orphacode: number): Promise<
   // the answer — both derived from one query.
   const cached = readGenes();
   if (cached.length > 0) {
-    return mapGeneRows(cached);
+    const sentinel = cached.find(
+      (r) => r.gene_symbol === NEGATIVE_CACHE_MARKER,
+    );
+    const isNegativeOnly =
+      sentinel !== undefined &&
+      cached.every((r) => r.gene_symbol === NEGATIVE_CACHE_MARKER);
+    if (!isNegativeOnly) {
+      return mapGeneRows(cached);
+    }
+    if (isFreshSentinel(sentinel.fetched_at)) {
+      return [];
+    }
+    // Stale negative entry: drop it and fall through to a re-fetch.
+    deleteGeneSentinelStmt.run(orphacode, NEGATIVE_CACHE_MARKER);
   }
 
   try {
     await fetchAndCacheGenes(orphacode);
-  } catch {
-    return [];
+  } catch (error: unknown) {
+    // A fetch failure is not "no data" — surface it so the tool layer can
+    // report a retriable failure instead of a confident empty result.
+    throw new ToolError(
+      "orphadata",
+      error instanceof Error ? error.message : String(error),
+      error instanceof Error ? error : undefined,
+    );
   }
 
   // Only after a miss do we re-read to pick up freshly inserted rows.
@@ -358,6 +427,7 @@ export async function getDiseasePhenotypes(orphacode: number): Promise<
     hpo_id: string;
     phenotype_name: string;
     frequency: string | null;
+    fetched_at: number | null;
   }
   const toDtos = (rows: PhenotypeRow[]) =>
     rows
@@ -373,13 +443,30 @@ export async function getDiseasePhenotypes(orphacode: number): Promise<
   // means "already fetched"; the answer is that same array filtered.
   const cached = readAll();
   if (cached.length > 0) {
-    return toDtos(cached);
+    const sentinel = cached.find((r) => r.hpo_id === NEGATIVE_CACHE_MARKER);
+    const isNegativeOnly =
+      sentinel !== undefined &&
+      cached.every((r) => r.hpo_id === NEGATIVE_CACHE_MARKER);
+    if (!isNegativeOnly) {
+      return toDtos(cached);
+    }
+    if (isFreshSentinel(sentinel.fetched_at)) {
+      return [];
+    }
+    // Stale negative entry: drop it and fall through to a re-fetch.
+    deletePhenotypeSentinelStmt.run(orphacode, NEGATIVE_CACHE_MARKER);
   }
 
   try {
     await fetchAndCachePhenotypes(orphacode);
-  } catch {
-    return [];
+  } catch (error: unknown) {
+    // A fetch failure is not "no data" — surface it so the tool layer can
+    // report a retriable failure instead of a confident empty result.
+    throw new ToolError(
+      "orphadata",
+      error instanceof Error ? error.message : String(error),
+      error instanceof Error ? error : undefined,
+    );
   }
 
   // Only after a miss do we re-read to pick up freshly inserted rows.

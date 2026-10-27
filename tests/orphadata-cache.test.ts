@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll, vi } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { resetToolCache } from "../src/backend/tools/utils/tool-cache";
@@ -363,20 +364,76 @@ describe("Orphadata Cache — Full Suite", () => {
   });
 
   describe("Error Handling", () => {
-    test("getDiseaseGenes returns empty on fetch failure", async () => {
+    // Corrected behavior (finding #4): a fetch failure must NOT be reported
+    // as "no data" — getDiseaseGenes/getDiseasePhenotypes throw a ToolError
+    // so the tool layer can surface a retriable failure.
+    test("getDiseaseGenes throws ToolError on fetch failure", async () => {
       const savedFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
-      const genes = await cache.getDiseaseGenes(12345);
-      expect(genes).toEqual([]);
+      await expect(cache.getDiseaseGenes(12345)).rejects.toThrow(
+        "Network error",
+      );
       globalThis.fetch = savedFetch;
     });
 
-    test("getDiseasePhenotypes returns empty on fetch failure", async () => {
+    test("getDiseasePhenotypes throws ToolError on fetch failure", async () => {
       const savedFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
-      const phenotypes = await cache.getDiseasePhenotypes(12345);
-      expect(phenotypes).toEqual([]);
+      await expect(cache.getDiseasePhenotypes(12345)).rejects.toThrow(
+        "Network error",
+      );
       globalThis.fetch = savedFetch;
+    });
+
+    test("a failed fetch is not negative-cached — next call retries", async () => {
+      const savedFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+      await expect(cache.getDiseaseGenes(12346)).rejects.toThrow();
+      globalThis.fetch = savedFetch;
+      // Fetch restored: the same code now resolves (empty result, fetch hit).
+      const mockFetch = globalThis.fetch as any;
+      const callsBefore = mockFetch.mock.calls.length;
+      const genes = await cache.getDiseaseGenes(12346);
+      expect(genes).toEqual([]);
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+  });
+
+  describe("Negative Cache Expiry", () => {
+    const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
+
+    function ageSentinel(table: string, keyColumn: string, code: number) {
+      const db = new Database(String(process.env.ORPHADATA_DB_PATH));
+      db.query(
+        `UPDATE ${table} SET fetched_at = ? WHERE orphacode = ? AND ${keyColumn} = ''`,
+      ).run(Date.now() - THIRTY_ONE_DAYS_MS, code);
+      db.close();
+    }
+
+    test("expired negative gene sentinel is treated as a miss and re-fetched", async () => {
+      const mockFetch = globalThis.fetch as any;
+      await cache.getDiseaseGenes(99995); // fetch + fresh sentinel
+      const callsBefore = mockFetch.mock.calls.length;
+      await cache.getDiseaseGenes(99995); // fresh sentinel hit, no fetch
+      expect(mockFetch.mock.calls.length).toBe(callsBefore);
+
+      ageSentinel("orphadata_genes", "gene_symbol", 99995);
+      const genes = await cache.getDiseaseGenes(99995); // stale → re-fetch
+      expect(genes).toEqual([]);
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    test("expired negative phenotype sentinel is treated as a miss and re-fetched", async () => {
+      const mockFetch = globalThis.fetch as any;
+      await cache.getDiseasePhenotypes(99994); // fetch + fresh sentinel
+      const callsBefore = mockFetch.mock.calls.length;
+      await cache.getDiseasePhenotypes(99994); // fresh sentinel hit, no fetch
+      expect(mockFetch.mock.calls.length).toBe(callsBefore);
+
+      ageSentinel("orphadata_phenotypes", "hpo_id", 99994);
+      const phenotypes = await cache.getDiseasePhenotypes(99994); // stale → re-fetch
+      expect(phenotypes).toEqual([]);
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 
