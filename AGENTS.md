@@ -270,15 +270,15 @@ ddx.care is explicitly labeled "RESEARCH PROOF-OF-CONCEPT ONLY. NOT a medical de
 
 ### Job Data (SQLite `jobs` table)
 
-- **TTL**: Terminal jobs (completed/failed) persist for `JOB_TTL_MS` (default 60 min) and are then scrubbed and deleted. Pending jobs are never TTL-deleted; they are governed by `PENDING_JOB_TIMEOUT_MS` (default `DIAGNOSIS_TIMEOUT_MS + 120s`). For sensitive deployments, reduce `JOB_TTL_MS` (e.g., `JOB_TTL_MS=300000` for 5-minute **terminal** retention) — this only affects results after a diagnosis finishes, not active workflows. Both `JOB_TTL_MS` and `PENDING_JOB_TIMEOUT_MS` must be >= `DIAGNOSIS_TIMEOUT_MS`; `validateConfig()` enforces this.
+- **TTL**: Terminal jobs (completed/failed) persist for `JOB_TTL_MS` (default 60 min) and are then scrubbed and deleted. Pending jobs are never TTL-deleted; they are governed by `PENDING_JOB_TIMEOUT_MS` (default `DIAGNOSIS_TIMEOUT_MS + 120s`). For sensitive deployments, reduce `JOB_TTL_MS` — this only affects results after a diagnosis finishes, not active workflows. Both `JOB_TTL_MS` and `PENDING_JOB_TIMEOUT_MS` must be >= `DIAGNOSIS_TIMEOUT_MS`, and `validateConfig()` enforces this at startup, so a 5-minute **terminal** retention (`JOB_TTL_MS=300000`) also requires `DIAGNOSIS_TIMEOUT_MS<=300000`.
 - **Scrub-before-delete**: `cleanupExpired()` nulls the `result` and `error` columns and resets `progress` to `'[]'` before the `DELETE`, reducing recoverability from disk images where SQLite has not yet reclaimed pages. Applies only to terminal jobs.
-- **In-memory only**: The `jobs` SQLite database is file-backed but transient — data is lost on server restart. `markStalePending()` on startup marks all pending jobs as failed. `cleanupExpired(JOB_TTL_MS)` also runs once on startup to remove terminal jobs that expired during downtime.
+- **File-backed, survives restarts**: The `jobs` SQLite database is a file on disk (WAL mode); its contents are not lost on server restart. `markStalePending()` on startup marks all pending jobs as failed — pending jobs are the only data lost on restart. Non-expired terminal jobs survive and remain readable until `cleanupExpired(JOB_TTL_MS)` removes them; `cleanupExpired(JOB_TTL_MS)` also runs once on startup to remove terminal jobs that expired during downtime.
 
 ### Audit Log
 
 - **Tool-arg redaction**: When `AUDIT_LOG_REDACT_TOOL_ARGS=1` (default), tool-call events record only the tool name, argument count, and a presence indicator (`argsPresent`/`argCount`) — not raw argument values (drug names, condition names, search queries). Set `AUDIT_LOG_REDACT_TOOL_ARGS=0` for debugging sessions.
 - **Time-based purge**: The `AuditLogger.purgeOlderThan(hours)` method removes JSON Lines entries older than `AUDIT_LOG_RETENTION_HOURS` (default 168h / 7 days). A timer calls this at most once per hour (every `AUDIT_LOG_RETENTION_HOURS / 4`, minimum 1 hour). This complements the existing size-based rotation (`AUDIT_LOG_MAX_SIZE_MB` × `AUDIT_LOG_MAX_FILES`).
-- **Startup logging**: The server logs PHI retention settings on startup.
+- **Startup logging**: The server does not log PHI retention settings on startup — the `server_start` log entry contains no TTL or retention fields. Check the effective environment/configuration directly to confirm retention settings.
 
 ### Frontend
 
@@ -299,7 +299,7 @@ ddx.care is explicitly labeled "RESEARCH PROOF-OF-CONCEPT ONLY. NOT a medical de
 Backend test files in `tests/`:
 - `api.test.ts` — API route handler tests
 - `tools.test.ts` — Medical tool execution tests
-- `api-contract.test.ts` — API contract tests (live API with `RUN_CONTRACT=1`); fetches one real record per external API and asserts the exact fields each tool reads. Catches API schema drift. Runs in CI on PRs and nightly. Includes a brand-name openFDA label-query regression case (locks in the across-fields OR behavior of `generic_name:X+brand_name:X`).
+- `api-contract.test.ts` — API contract tests (live API with `RUN_CONTRACT=1`); fetches one real record per external API and asserts the exact fields each tool reads. Catches API schema drift. Runs in CI on PRs and pushes to `main`. Includes a brand-name openFDA label-query regression case (locks in the across-fields OR behavior of `generic_name:X+brand_name:X`).
 - `workflow.test.ts` — Diagnostic workflow, `limitConcurrency`, `withRetry`, `splitToList` tests
 - `progress-store.test.ts` — `JobStore` CRUD, pub/sub, cleanup, scrub-before-delete, progress-cap tests
 - `rate-limiter.test.ts` — Rate limiting, concurrent workflow cap, prune tests
@@ -351,20 +351,7 @@ These files start a server with `WS_TOKEN_SECRET` set and must run separately fr
 
 ## Skills (`.agents/skills/`)
 
-10 Claude Code skills installed for this project (see `skills-lock.json`):
-
-| Skill | Source | Description |
-|---|---|---|
-| `agent-development` | `anthropics/claude-code` | Agent structure, system prompts, triggering conditions, and development best practices |
-| `code-review` | `anthropics/knowledge-work-plugins` | Review code for security, performance, correctness. Trigger with a PR URL or "review this" |
-| `documentation` | `anthropics/knowledge-work-plugins` | Write/maintain technical docs — READMEs, API docs, runbooks, onboarding guides |
-| `frontend-design` | `anthropics/skills` | Create production-grade frontend interfaces with high design quality |
-| `mastra` | `mastra-ai/skills` | Mastra framework guide — agents, workflows, tools, documentation lookup strategies |
-| `mastra-docs` | `mastra-ai/mastra` | Documentation guidelines for writing/editing Mastra docs |
-| `system-design` | `anthropics/knowledge-work-plugins` | Design systems, APIs, data models, service boundaries, and architectures |
-| `task-management` | `anthropics/knowledge-work-plugins` | Task tracking via shared `TASKS.md` file |
-| `theme-factory` | `anthropics/skills` | Toolkit for styling artifacts with 10 pre-set themes (colors/fonts) |
-| `webapp-testing` | `anthropics/skills` | Interact with and test local web apps using Playwright — screenshots, logs, verification |
+The Claude Code skills installed for this project are listed in `skills-lock.json`, which is the source of truth (35 entries). Do not maintain a copy of the list here — it drifts.
 
 ## Best Practices
 
