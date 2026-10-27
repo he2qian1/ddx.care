@@ -143,11 +143,24 @@ export function useJobStream(
               };
             }
           } else if (data.type === "completed") {
-            next = {
-              ...current,
-              status: "completed",
-              result: reportOutcomeSchema.parse(data.result),
-            };
+            const parsed = reportOutcomeSchema.safeParse(data.result);
+            if (parsed.success) {
+              next = {
+                ...current,
+                status: "completed",
+                result: parsed.data,
+              };
+            } else {
+              // A completed message without a valid result must be terminal:
+              // throwing here would only be logged, leaving the UI pending
+              // forever (the server then closes normally, so no retry runs).
+              next = {
+                ...current,
+                status: "failed",
+                error:
+                  "Diagnosis completed, but its result could not be read. Please start a new case.",
+              };
+            }
           } else if (data.type === "failed") {
             next = { ...current, status: "failed", error: data.error };
           }

@@ -36,7 +36,23 @@ export const websocketHandlers = {
     }
 
     if (job.status === "completed") {
-      ws.send(JSON.stringify({ type: "completed", jobId, result: job.result }));
+      // getJob() leaves result undefined when the stored result no longer
+      // parses (e.g. legacy schema). Never send `completed` without a valid
+      // result: the client cannot parse it and would hang — surface failed.
+      if (job.result) {
+        ws.send(
+          JSON.stringify({ type: "completed", jobId, result: job.result }),
+        );
+      } else {
+        ws.send(
+          JSON.stringify({
+            type: "failed",
+            jobId,
+            error:
+              "Diagnosis completed, but its stored result could not be read. Please start a new case.",
+          }),
+        );
+      }
       ws.close();
       return;
     } else if (job.status === "failed") {

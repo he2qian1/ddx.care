@@ -115,6 +115,26 @@ describe("WebSocket handler — open", () => {
     });
   });
 
+  test("sends failed, not completed-without-result, for a completed row whose stored result no longer parses", () => {
+    const jobId = "job-completed-corrupt";
+    // Simulate a legacy/corrupt row: status completed, stored result fails
+    // the current report schema (getJob degrades it to result: undefined).
+    const db = (progressStore as any).db;
+    db.prepare(
+      "INSERT INTO jobs (id, status, result, error, createdAt, progress) VALUES (?, 'completed', ?, NULL, ?, '[]')",
+    ).run(jobId, JSON.stringify({ status: "not-a-real-outcome" }), Date.now());
+
+    const ws = new MockWebSocket({ jobId });
+    websocketHandlers.open(ws as any);
+
+    expect(ws.closed).toBe(true);
+    expect(ws.messages).toHaveLength(1);
+    const msg = JSON.parse(ws.messages[0]);
+    expect(msg.type).toBe("failed");
+    expect(msg.error).toContain("could not be read");
+    expect(msg).not.toHaveProperty("result");
+  });
+
   test("closes after sending error for failed job", () => {
     progressStore.createJob("job-3");
     progressStore.fail("job-3", "Something broke");

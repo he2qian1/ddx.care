@@ -1062,6 +1062,30 @@ describe("useJobStream", () => {
     expect(result.current.status?.result).toEqual(outcome);
   });
 
+  test("treats a completed message without a valid result as failed, not pending", async () => {
+    const { result } = renderHook(() => useJobStream("job-complete-corrupt"));
+
+    await hookAct(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ws = MockWebSocket.instances[0];
+
+    // The server sends `completed` with the result key absent when the
+    // stored result is unreadable; simulateMessage JSON-round-trips, so
+    // result: undefined drops the key exactly like the real payload.
+    await hookAct(async () => {
+      ws.simulateMessage({
+        type: "completed",
+        jobId: "job-complete-corrupt",
+        result: undefined,
+      });
+    });
+
+    expect(result.current.status?.status).toBe("failed");
+    expect(result.current.status?.error).toContain("could not be read");
+  });
+
   test("handles failed messages", async () => {
     const { result } = renderHook(() => useJobStream("job-fail"));
 
