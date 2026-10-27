@@ -1450,6 +1450,18 @@ describe("Accessibility — InputDashboard", () => {
     expect(ageInput.getAttribute("aria-invalid")).toBeNull();
   });
 
+  test("all six form controls have programmatic accessible names", () => {
+    const { getByLabelText } = render(
+      createElement(InputDashboard, { onSubmit: () => {} }),
+    );
+    expect(getByLabelText("Age").id).toBe("age-input");
+    expect(getByLabelText("Sex").id).toBe("sex-select");
+    expect(getByLabelText("Chief Complaint").id).toBe("chief-complaint-input");
+    expect(getByLabelText("Medical History").tagName).toBe("TEXTAREA");
+    expect(getByLabelText("Conversation Transcript").tagName).toBe("TEXTAREA");
+    expect(getByLabelText("Lab Results").tagName).toBe("TEXTAREA");
+  });
+
   // Note: React 19 controlled inputs + happy-dom don't process fireEvent.change
   // into state updates, so interaction-based tests for aria-invalid are deferred
   // to E2E. The static attribute structure (id, aria-describedby link) is

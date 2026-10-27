@@ -295,7 +295,12 @@ export const InputDashboard = forwardRef<
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Age</label>
+            <label
+              htmlFor="age-input"
+              className="block text-sm font-medium mb-1"
+            >
+              Age
+            </label>
             <input
               id="age-input"
               type="text"
@@ -320,8 +325,14 @@ export const InputDashboard = forwardRef<
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Sex</label>
+            <label
+              htmlFor="sex-select"
+              className="block text-sm font-medium mb-1"
+            >
+              Sex
+            </label>
             <select
+              id="sex-select"
               value={sex}
               onChange={(e) => setSex(e.target.value)}
               className={inputClass}
@@ -333,10 +344,14 @@ export const InputDashboard = forwardRef<
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label
+              htmlFor="chief-complaint-input"
+              className="block text-sm font-medium mb-1"
+            >
               Chief Complaint
             </label>
             <input
+              id="chief-complaint-input"
               type="text"
               value={chiefComplaint}
               onChange={(e) => setChiefComplaint(e.target.value)}
@@ -376,6 +391,7 @@ export const InputDashboard = forwardRef<
           <CharCount value={medicalHistory} max={MAX_CHARS} />
         </div>
         <textarea
+          aria-label="Medical History"
           value={medicalHistory}
           onChange={(e) => setMedicalHistory(e.target.value)}
           placeholder="Past diagnoses, medications, allergies, family history...&#10;You can also paste EHR summaries or drop a file below."
@@ -426,6 +442,7 @@ export const InputDashboard = forwardRef<
           <CharCount value={transcript} max={MAX_CHARS} />
         </div>
         <textarea
+          aria-label="Conversation Transcript"
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
           placeholder="Doctor-patient encounter notes or transcript..."
@@ -457,6 +474,7 @@ export const InputDashboard = forwardRef<
           <CharCount value={labResults} max={MAX_CHARS} />
         </div>
         <textarea
+          aria-label="Lab Results"
           value={labResults}
           onChange={(e) => setLabResults(e.target.value)}
           placeholder="Blood panels, urinalysis, imaging reports..."
