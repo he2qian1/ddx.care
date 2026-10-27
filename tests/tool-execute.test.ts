@@ -543,7 +543,7 @@ describe("drug-interaction tool execute", () => {
                     conceptProperties: [
                       {
                         rxcui: regressionCase.rxcuis[index],
-                        name,
+                        name: regressionCase.resolvedNames?.[index] ?? name,
                         tty: "SCD",
                       },
                     ],
@@ -565,6 +565,14 @@ describe("drug-interaction tool execute", () => {
             results: [
               {
                 drug_interactions: [regressionCase.labelInteractionText[index]],
+                ...(regressionCase.labelGenericNames
+                  ? {
+                      openfda: {
+                        generic_name: [regressionCase.labelGenericNames[index]],
+                        brand_name: [regressionCase.drugNames[index]],
+                      },
+                    }
+                  : {}),
               },
             ],
           }),

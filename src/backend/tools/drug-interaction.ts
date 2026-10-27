@@ -499,12 +499,36 @@ export const drugInteractionTool = createTool({
               otherIdentity.rxcui,
               otherIdentity.resolvedName.toLowerCase(),
             );
+            // Bare ingredient name: labels usually mention the ingredient
+            // alone, not the brand input or the full resolved SBD/SCD phrase
+            // ("atorvastatin 80 MG Oral Tablet [Lipitor]"), so brand-name
+            // inputs otherwise false-negative. Same derivation as the
+            // generic_name fallback in fetchDrugLabel.
+            const ingredient = otherIdentity.resolvedName
+              .split(/\s+/)[0]
+              ?.toLowerCase();
+            if (ingredient) otherVariants.push(ingredient);
           }
+          // The partner label's own openFDA names cover cases where the
+          // resolved name's first token is not how labels refer to the drug.
+          const otherLabelOutcome = labels[otherIndex];
+          if (otherLabelOutcome?.status === "checked") {
+            const openfda = otherLabelOutcome.label.openfda;
+            for (const name of [
+              openfda?.generic_name?.[0],
+              openfda?.brand_name?.[0],
+            ]) {
+              if (name) otherVariants.push(name.toLowerCase());
+            }
+          }
+          const uniqueVariants = [...new Set(otherVariants)].filter(
+            (variant) => variant.length > 0,
+          );
 
           let matched = false;
 
           if (combinedText) {
-            for (const variant of otherVariants) {
+            for (const variant of uniqueVariants) {
               const regex = new RegExp(`\\b${escapeRegex(variant)}\\b`, "i");
               if (regex.test(combinedText)) {
                 const snippet = extractSnippet(combinedText, variant, 300);
@@ -533,7 +557,7 @@ export const drugInteractionTool = createTool({
           }
 
           if (!matched && contraindicationOnly) {
-            for (const variant of otherVariants) {
+            for (const variant of uniqueVariants) {
               const regex = new RegExp(`\\b${escapeRegex(variant)}\\b`, "i");
               if (regex.test(contraindicationOnly)) {
                 const snippet = extractSnippet(
