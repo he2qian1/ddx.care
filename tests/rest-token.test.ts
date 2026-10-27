@@ -54,7 +54,7 @@ async function loadTokenPrimitives() {
  */
 function makeToken(jobId: string, now: number = Date.now()): string {
   const expiry = now + JOB_TTL_MS;
-  const payload = `${jobId}.${expiry}`;
+  const payload = `token:${jobId}.${expiry}`;
   const hmac = createHmac("sha256", process.env.WS_TOKEN_SECRET ?? "")
     .update(payload)
     .digest("hex");
@@ -337,6 +337,20 @@ describe("WebSocket ticket primitives (unit, no server)", () => {
   test("verifyWsTicket returns false for a ticket bound to a different job", () => {
     const ticket = generateWsTicket("job-a");
     expect(verifyWsTicket("job-b", ticket)).toBe(false);
+  });
+
+  test("credentials are purpose-bound: a ticket fails verifyToken and a token fails verifyWsTicket", () => {
+    // Same job, equal TTLs — before purpose binding these produced the
+    // identical credential string and cross-verified both ways.
+    const now = Date.now();
+    const ticket = generateWsTicket("job-cross", 3600, now);
+    const token = generateToken("job-cross", 3600_000, now);
+    expect(ticket).not.toBe(token);
+    expect(verifyToken("job-cross", ticket, now)).toBe(false);
+    expect(verifyWsTicket("job-cross", token, now)).toBe(false);
+    // Each still verifies under its own purpose.
+    expect(verifyWsTicket("job-cross", ticket, now)).toBe(true);
+    expect(verifyToken("job-cross", token, now)).toBe(true);
   });
 
   test("verifyWsTicket returns false for a malformed ticket", () => {

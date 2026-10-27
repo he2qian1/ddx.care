@@ -113,6 +113,22 @@ describe("WebSocket ticket validation (integration with WS_TOKEN_SECRET)", () =>
     expect(res.status).toBe(403);
   });
 
+  test("REST token presented as a ticket is rejected with 403 (purpose-bound)", async () => {
+    const { jobId, token } = await createJob();
+    const res = await fetch(`${BASE}/ws?jobId=${jobId}&ticket=${token}`, {
+      headers: { Origin: VALID_ORIGIN },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("WS ticket presented as a REST token is rejected with 403 (purpose-bound)", async () => {
+    const { jobId, wsTicket } = await createJob();
+    const res = await fetch(`${BASE}/v1/status/${jobId}`, {
+      headers: { "X-Job-Token": wsTicket },
+    });
+    expect(res.status).toBe(403);
+  });
+
   test("long-lived token still accepted as migration fallback", async () => {
     const { jobId, token } = await createJob();
     const res = await fetch(`${BASE}/ws?jobId=${jobId}&token=${token}`, {

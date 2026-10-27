@@ -3,10 +3,17 @@ import { WS_TOKEN_SECRET, JOB_TTL_MS } from "../config";
 
 const HEX_RE = /^[0-9a-f]+$/;
 
-function generateCredential(jobId: string, ttlMs: number, now: number): string {
+type CredentialPurpose = "token" | "ticket";
+
+function generateCredential(
+  jobId: string,
+  purpose: CredentialPurpose,
+  ttlMs: number,
+  now: number,
+): string {
   if (!WS_TOKEN_SECRET) return "";
   const expiry = now + ttlMs;
-  const payload = `${jobId}.${expiry}`;
+  const payload = `${purpose}:${jobId}.${expiry}`;
   const hmac = createHmac("sha256", WS_TOKEN_SECRET)
     .update(payload)
     .digest("hex");
@@ -15,6 +22,7 @@ function generateCredential(jobId: string, ttlMs: number, now: number): string {
 
 function verifyCredential(
   jobId: string,
+  purpose: CredentialPurpose,
   credential: string,
   now: number,
 ): boolean {
@@ -30,7 +38,7 @@ function verifyCredential(
   const expiry = Number(expiryStr);
   if (!Number.isFinite(expiry) || expiry <= now) return false;
   const expected = createHmac("sha256", WS_TOKEN_SECRET)
-    .update(`${jobId}.${expiryStr}`)
+    .update(`${purpose}:${jobId}.${expiryStr}`)
     .digest("hex");
   return timingSafeEqual(Buffer.from(expected), Buffer.from(hmacHex));
 }
@@ -39,8 +47,10 @@ function verifyCredential(
  * Durable job capability token. Authenticates REST endpoints
  * (GET /v1/status, DELETE /v1/diagnose) and the /ws upgrade during migration.
  *
- * Format: `<expiryMs>.<hmacHex>` where `hmacHex = HMAC-SHA256(secret, "jobId.expiry")`.
- * The embedded expiry ties credential lifetime to job lifetime (JOB_TTL_MS by default).
+ * Format: `<expiryMs>.<hmacHex>` where `hmacHex = HMAC-SHA256(secret, "token:jobId.expiry")`.
+ * The purpose prefix binds the credential to this use: a token can never verify
+ * as a WebSocket ticket, and vice versa. The embedded expiry ties credential
+ * lifetime to job lifetime (JOB_TTL_MS by default).
  *
  * @param jobId Job identifier (UUID)
  * @param ttlMs Token lifetime in ms (defaults to JOB_TTL_MS)
@@ -51,7 +61,7 @@ export function generateToken(
   ttlMs: number = JOB_TTL_MS,
   now: number = Date.now(),
 ): string {
-  return generateCredential(jobId, ttlMs, now);
+  return generateCredential(jobId, "token", ttlMs, now);
 }
 
 /**
@@ -72,16 +82,18 @@ export function verifyToken(
   token: string,
   now: number = Date.now(),
 ): boolean {
-  return verifyCredential(jobId, token, now);
+  return verifyCredential(jobId, "token", token, now);
 }
 
 /**
  * Short-lived, stateless WebSocket upgrade ticket. Bounds the window in which
  * a URL-borne /ws credential can be replayed (default 120s).
  *
- * Format: `<expiryMs>.<hmacHex>` where `hmacHex = HMAC-SHA256(secret, "jobId.expiry")`.
- * Identical structure to generateToken but with a short, independent TTL so
- * the two capabilities are not interchangeable.
+ * Format: `<expiryMs>.<hmacHex>` where `hmacHex = HMAC-SHA256(secret, "ticket:jobId.expiry")`.
+ * Same outer structure as generateToken but with a short, independent TTL and a
+ * different signed purpose prefix ("ticket:" vs "token:"), so the two
+ * capabilities are not interchangeable: a ticket fails verifyToken and a token
+ * fails verifyWsTicket.
  *
  * @param jobId  Job identifier (UUID)
  * @param ttlSec Ticket lifetime in seconds (default 120)
@@ -92,7 +104,7 @@ export function generateWsTicket(
   ttlSec: number = 120,
   now: number = Date.now(),
 ): string {
-  return generateCredential(jobId, ttlSec * 1000, now);
+  return generateCredential(jobId, "ticket", ttlSec * 1000, now);
 }
 
 /**
@@ -112,5 +124,5 @@ export function verifyWsTicket(
   ticket: string,
   now: number = Date.now(),
 ): boolean {
-  return verifyCredential(jobId, ticket, now);
+  return verifyCredential(jobId, "ticket", ticket, now);
 }
