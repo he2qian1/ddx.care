@@ -145,29 +145,45 @@ function App() {
 
     const controller = new AbortController();
     const { jobId, token, generation } = activeContext;
-    getJobStatus(jobId, token, controller.signal)
-      .then((status) => {
-        dispatch({ type: "statusReceived", jobId, generation, status });
-      })
-      .catch((value: ApiError) => {
-        if (controller.signal.aborted) return;
-        if (value.status === 403) {
-          removeJobCredential(jobId);
+    let timer: number | null = null;
+
+    // A refresh or deep link can land here while the job is still running.
+    // statusReceived keeps the status string at "pending", which does not
+    // re-trigger this effect, so poll from inside it (same 3s interval as
+    // useJobStream's fallback) until the job reaches a terminal status.
+    const fetchStatus = () => {
+      getJobStatus(jobId, token, controller.signal)
+        .then((status) => {
+          if (controller.signal.aborted) return;
+          dispatch({ type: "statusReceived", jobId, generation, status });
+          if (status.status === "pending") {
+            timer = window.setTimeout(fetchStatus, 3000);
+          }
+        })
+        .catch((value: ApiError) => {
+          if (controller.signal.aborted) return;
+          if (value.status === 403) {
+            removeJobCredential(jobId);
+            dispatch({
+              type: "authorizationChanged",
+              jobId,
+              authorization: "expired",
+            });
+            return;
+          }
           dispatch({
-            type: "authorizationChanged",
+            type: "streamError",
             jobId,
-            authorization: "expired",
+            generation,
+            error: "Could not load results for this case.",
           });
-          return;
-        }
-        dispatch({
-          type: "streamError",
-          jobId,
-          generation,
-          error: "Could not load results for this case.",
         });
-      });
-    return () => controller.abort();
+    };
+    fetchStatus();
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [
     route.screen,
     activeContext?.jobId,

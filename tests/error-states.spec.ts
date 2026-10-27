@@ -37,6 +37,44 @@ test.describe("Error states & edge paths", () => {
     ).toBeVisible();
   });
 
+  test("deep-link to a still-pending job keeps polling until the report renders", async ({
+    page,
+  }) => {
+    await fillValidForm(page);
+    await submitCase(page);
+    await waitForWaitingRoom(page);
+
+    const jobId = jobIdFromUrl(page.url());
+    expect(jobId).toBeTruthy();
+
+    // Force the first status response on the results screen to say the job
+    // is still pending, regardless of real server timing. A single-fetch
+    // results screen would stick on the "Loading results..." spinner; a
+    // polling one refetches and renders the report once the real status
+    // turns terminal.
+    let statusRequests = 0;
+    await page.route(`**/v1/status/${jobId}`, async (route) => {
+      statusRequests += 1;
+      if (statusRequests === 1) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ jobId, status: "pending", progress: [] }),
+        });
+      }
+      return route.continue();
+    });
+
+    await page.goto(`/results/${jobId}`);
+    await expect(page.getByText("Loading results...")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByRole("heading", { name: "Differential Diagnosis" }),
+    ).toBeVisible({ timeout: 20_000 });
+    expect(statusRequests).toBeGreaterThan(1);
+  });
+
   test("deep-link without same-session credentials shows missing context", async ({
     page,
   }) => {
