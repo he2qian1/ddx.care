@@ -316,6 +316,76 @@ describe("FileDropZone", () => {
 
     expect(onFileContent).toHaveBeenCalledWith("file content");
   });
+
+  const selectFile = async (container: HTMLElement, file: File) => {
+    const input = Array.from(
+      container.getElementsByTagName("input"),
+    )[0] as HTMLInputElement;
+    const dataTransfer = new happyWindow.DataTransfer();
+    dataTransfer.items.add(file);
+    await act(async () => {
+      input.files = dataTransfer.files;
+      fireEvent.change(input);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+  };
+
+  test("rejects an oversized file without calling onFileContent", async () => {
+    const onFileContent = vi.fn();
+    const { container } = render(
+      createElement(FileDropZone, { onFileContent, label: "Upload" }),
+    );
+
+    const file = new happyWindow.File(["x".repeat(50_001)], "big.txt", {
+      type: "text/plain",
+    });
+    await selectFile(container, file);
+
+    expect(onFileContent).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("too large");
+    expect(container.textContent).toContain("big.txt");
+  });
+
+  test("rejects a binary file dropped onto the zone", async () => {
+    const onFileContent = vi.fn();
+    const { container } = render(
+      createElement(FileDropZone, { onFileContent, label: "Upload" }),
+    );
+
+    const file = new happyWindow.File(["\x89PNG"], "scan.png", {
+      type: "image/png",
+    });
+    const zone = container.querySelector('[role="button"]');
+
+    await act(async () => {
+      fireEvent.drop(zone!, { dataTransfer: { files: [file] } });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(onFileContent).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("not a text file");
+  });
+
+  test("shows an error and no filename when the file cannot be read", async () => {
+    const onFileContent = vi.fn();
+    const { container } = render(
+      createElement(FileDropZone, { onFileContent, label: "Upload" }),
+    );
+
+    const file = new happyWindow.File(["file content"], "notes.txt", {
+      type: "text/plain",
+    });
+    file.text = () => Promise.reject(new Error("read failed"));
+    await selectFile(container, file);
+
+    expect(onFileContent).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Could not read");
+    expect(container.querySelector('[role="alert"]')).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------

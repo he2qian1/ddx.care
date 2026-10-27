@@ -6,15 +6,41 @@ interface FileDropZoneProps {
   label: string;
 }
 
+const MAX_FILE_BYTES = 50_000;
+
 export function FileDropZone({ onFileContent, label }: FileDropZoneProps) {
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const helpId = `fdz-help-${label.replace(/\s+/g, "-").toLowerCase()}`;
 
   const handleFile = async (file: File) => {
-    setFileName(file.name);
-    onFileContent(await file.text());
+    if (file.size > MAX_FILE_BYTES) {
+      setFileName(null);
+      setError(
+        `"${file.name}" is too large. Files must be ${MAX_FILE_BYTES.toLocaleString()} bytes or smaller.`,
+      );
+      return;
+    }
+    const isTextFile =
+      file.type.startsWith("text/") || /\.(txt|csv)$/i.test(file.name);
+    if (!isTextFile) {
+      setFileName(null);
+      setError(
+        `"${file.name}" is not a text file. Only .txt and .csv files are accepted.`,
+      );
+      return;
+    }
+    setError(null);
+    try {
+      const content = await file.text();
+      setFileName(file.name);
+      onFileContent(content);
+    } catch {
+      setFileName(null);
+      setError(`Could not read "${file.name}". Please try another file.`);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -78,6 +104,11 @@ export function FileDropZone({ onFileContent, label }: FileDropZoneProps) {
             Drop a file or click to browse (.txt,.csv)
           </p>
         </div>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400 mt-2">
+          {error}
+        </p>
       )}
     </div>
   );
