@@ -1367,7 +1367,91 @@ describe("runDiagnosis - CMO parsing logic", () => {
 
     expect(result.status).toBe("available");
     if (result.status === "available") {
-      expect(result.diagnosisReport.specialistsConsulted).toHaveLength(1);
+      // Corrected expectation (finding #1): the cardiologist's call failed,
+      // so the CMO's claimed entry for it must not appear in the report —
+      // specialistsConsulted is built from successful consults only.
+      expect(result.diagnosisReport.specialistsConsulted).toHaveLength(0);
+    }
+  });
+
+  test("report lists only successful consults, ignoring CMO-invented entries", async () => {
+    let cmoCallCount = 0;
+    const mockCmoGenerate = mock(async () => {
+      cmoCallCount++;
+      if (cmoCallCount === 1) {
+        return {
+          object: {
+            specialistsToConsult: [{ id: "cardiologist" }],
+            isFinal: false,
+          },
+        };
+      }
+      return {
+        object: {
+          specialistsToConsult: [],
+          isFinal: true,
+          finalReport: {
+            chiefComplaint: "Headache",
+            patientSummary: "Test",
+            specialistsConsulted: [
+              { specialist: "cardiologist", keyFindings: "CMO paraphrase" },
+              { specialist: "neurologist", keyFindings: "Never consulted" },
+            ],
+            rankedDiagnoses: [
+              {
+                diagnosisName: "Test",
+                confidencePercentage: 50,
+                urgency: "Routine",
+                rationale: "Test",
+                supportingEvidence: "",
+                contradictoryEvidence: "",
+                suggestedNextSteps: "",
+              },
+            ],
+            crossSpecialtyObservations: "",
+            recommendedImmediateActions: "",
+          },
+        },
+      };
+    });
+
+    const mockMastra = {
+      getAgent: (id: string) => {
+        if (id === "chiefMedicalOfficer") {
+          return { generate: mockCmoGenerate };
+        }
+        if (id === "cardiologist") {
+          return {
+            generate: mock(async () => ({
+              text: "Actual cardiology findings",
+            })),
+          };
+        }
+        return undefined;
+      },
+    };
+
+    const result = await runDiagnosis.execute({
+      context: {} as any,
+      stepId: "run-diagnosis",
+      workflowId: "test-wf",
+      inputData: {
+        medicalHistory: "",
+        conversationTranscript: "",
+        labResults: "",
+      },
+      mastra: mockMastra as any,
+      runId: "successful-consults-only-id",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.diagnosisReport.specialistsConsulted).toEqual([
+        {
+          specialist: "cardiologist",
+          keyFindings: "Actual cardiology findings",
+        },
+      ]);
     }
   });
 

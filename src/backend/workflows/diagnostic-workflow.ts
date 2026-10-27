@@ -650,6 +650,10 @@ export async function generateFinalReport(opts: {
   cmo: Agent;
   prompt: string;
   builtContextHistory: string;
+  // Ground-truth consults that actually succeeded during the run. When
+  // provided, this replaces the CMO-supplied specialistsConsulted list in the
+  // returned report — the CMO's list is free text and is never trusted.
+  successfulConsults?: Array<{ specialist: string; keyFindings: string }>;
   abortSignal: AbortSignal;
   emit: (
     eventType: ProgressEventType,
@@ -663,11 +667,24 @@ export async function generateFinalReport(opts: {
     cmo,
     prompt,
     builtContextHistory,
+    successfulConsults,
     abortSignal,
     emit,
     logContext,
     jobId,
   } = opts;
+
+  // Derive the report's consulted list from successful consults only, so a
+  // specialist whose call failed (or who was never called) cannot appear.
+  const withVerifiedConsults = (
+    report: RawDiagnosisReport,
+  ): RawDiagnosisReport =>
+    successfulConsults
+      ? {
+          ...report,
+          specialistsConsulted: successfulConsults.map((c) => ({ ...c })),
+        }
+      : report;
 
   const cmoToolHooks = createToolEventHooks("chiefMedicalOfficer", jobId, emit);
 
@@ -684,7 +701,10 @@ export async function generateFinalReport(opts: {
     });
     const inspected = inspectReportAttempt(finalResponse);
     if (inspected.success) {
-      return { status: "available", diagnosisReport: inspected.report };
+      return {
+        status: "available",
+        diagnosisReport: withVerifiedConsults(inspected.report),
+      };
     }
     correctionReason = inspected.correctionReason;
     logger.warn("report_generation_attempt_failed", {
@@ -727,7 +747,10 @@ export async function generateFinalReport(opts: {
     });
     const inspected = inspectReportAttempt(correctionResponse);
     if (inspected.success) {
-      return { status: "available", diagnosisReport: inspected.report };
+      return {
+        status: "available",
+        diagnosisReport: withVerifiedConsults(inspected.report),
+      };
     }
     finalErrorCode = inspected.errorCode;
     logger.warn("report_generation_attempt_failed", {
@@ -801,6 +824,14 @@ export const runDiagnosis = createStep({
     let parseFailureCount = 0;
     const MAX_PARSE_FAILURES = 3;
     const allConsultedSpecialists = new Set<SpecialistId>();
+    // Consults that actually returned a response, with their findings. This —
+    // not the CMO's free-text list and not allConsultedSpecialists (an
+    // attempted set that keeps failed specialists) — is the source of the
+    // final report's specialistsConsulted.
+    const successfulConsults: Array<{
+      specialist: string;
+      keyFindings: string;
+    }> = [];
     const contextHistory = ["=== PATIENT CASE ===", patientSummary];
 
     let finalReportOutcome: ReportGenerationOutcome | null = null;
@@ -977,7 +1008,10 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
           );
           finalReportOutcome = {
             status: "available",
-            diagnosisReport: finalReport,
+            diagnosisReport: {
+              ...finalReport,
+              specialistsConsulted: successfulConsults.map((c) => ({ ...c })),
+            },
           };
           break;
         }
@@ -1002,6 +1036,7 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
             cmo,
             prompt: `You did not request any new specialists, or there are no more to consult. Please provide the final comprehensive differential diagnosis report based on the case and the consultations obtained so far.\n\n${builtContextHistory}`,
             builtContextHistory,
+            successfulConsults: [...successfulConsults],
             abortSignal: abortController.signal,
             emit,
             logContext: { jobId: runId, round },
@@ -1087,6 +1122,10 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
                   `Received analysis from ${specId}`,
                   { agentId: specId },
                 );
+                successfulConsults.push({
+                  specialist: specId,
+                  keyFindings: specResponse.text,
+                });
                 return `=== ${specId} Consult ===\n${specResponse.text}`;
               } else {
                 return `=== ${specId} Consult ===\nFailed to reach specialist (Not Found).`;
@@ -1128,6 +1167,7 @@ If you have enough information to make a final diagnosis, set "isFinal" to true 
           cmo,
           prompt: `Maximum diagnostic rounds (${MAX_ROUNDS}) reached. Please provide the final comprehensive differential diagnosis report based on the case and the consultations obtained so far.\n\n${builtContextHistory}`,
           builtContextHistory,
+          successfulConsults: [...successfulConsults],
           abortSignal: abortController.signal,
           emit,
           logContext: { jobId: runId, context: "max_rounds" },
