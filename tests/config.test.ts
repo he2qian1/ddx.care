@@ -53,6 +53,48 @@ describe("Config — DIAGNOSIS_TIMEOUT_MS env override", () => {
   });
 });
 
+describe("Config — AGENT_GENERATE_RETRY_BASE_DELAY env override", () => {
+  const key = "AGENT_GENERATE_RETRY_BASE_DELAY";
+
+  async function importFresh(value: string | undefined) {
+    const original = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+    try {
+      return await import(
+        `../src/backend/config?t=${Date.now()}-${Math.random()}`
+      );
+    } finally {
+      if (original === undefined) delete process.env[key];
+      else process.env[key] = original;
+    }
+  }
+
+  test("defaults to 1000 when unset", async () => {
+    const mod = await importFresh(undefined);
+    expect(mod.AGENT_GENERATE_RETRY_BASE_DELAY).toBe(1000);
+  });
+
+  test("reads custom value from env", async () => {
+    const mod = await importFresh("5000");
+    expect(mod.AGENT_GENERATE_RETRY_BASE_DELAY).toBe(5000);
+  });
+
+  test("validateConfig throws on non-positive value", async () => {
+    const mod = await importFresh("0");
+    expect(() => mod.validateConfig()).toThrow(
+      "AGENT_GENERATE_RETRY_BASE_DELAY",
+    );
+  });
+
+  test("validateConfig throws on non-numeric value", async () => {
+    const mod = await importFresh("abc");
+    expect(() => mod.validateConfig()).toThrow(
+      "AGENT_GENERATE_RETRY_BASE_DELAY",
+    );
+  });
+});
+
 describe("Config — validateConfig", () => {
   test("passes with current env (MOCK_LLM=1)", () => {
     const original = process.env.MOCK_LLM;

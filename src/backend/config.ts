@@ -50,7 +50,10 @@ export const AGENT_GENERATE_MAX_RETRIES = parseInt(
   process.env.AGENT_GENERATE_MAX_RETRIES ?? "3",
   10,
 );
-export const AGENT_GENERATE_RETRY_BASE_DELAY = 1000;
+export const AGENT_GENERATE_RETRY_BASE_DELAY = parseInt(
+  process.env.AGENT_GENERATE_RETRY_BASE_DELAY ?? "1000",
+  10,
+);
 
 const VALID_CONTEXT_MODES = [
   "none",
@@ -162,6 +165,14 @@ export function validateConfig() {
   ) {
     throw new Error(
       `Invalid AGENT_GENERATE_MAX_RETRIES: ${process.env.AGENT_GENERATE_MAX_RETRIES}. Must be a non-negative number.`,
+    );
+  }
+  if (
+    Number.isNaN(AGENT_GENERATE_RETRY_BASE_DELAY) ||
+    AGENT_GENERATE_RETRY_BASE_DELAY <= 0
+  ) {
+    throw new Error(
+      `Invalid AGENT_GENERATE_RETRY_BASE_DELAY: ${process.env.AGENT_GENERATE_RETRY_BASE_DELAY}. Must be a positive number.`,
     );
   }
   if (
