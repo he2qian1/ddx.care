@@ -24,6 +24,8 @@ export interface DiagnoseResponse {
   status: "pending";
   token: string;
   wsTicket: string;
+  /** Epoch ms when the job credential expires, as issued by the server. */
+  expiresAt?: number;
 }
 
 export type Diagnosis = DiagnosisReport["diagnoses"][number];

@@ -26,6 +26,7 @@ import {
   ALLOWED_ORIGINS,
   TRUSTED_ORIGINS,
   WS_TOKEN_SECRET,
+  JOB_TTL_MS,
 } from "../config";
 
 const CSP_VALUE =
@@ -397,13 +398,15 @@ export function createRoutes(
           );
         }
 
+        const issuedAt = Date.now();
         return withCors(
           Response.json(
             {
               jobId,
               status: "pending",
-              token: generateToken(jobId),
+              token: generateToken(jobId, JOB_TTL_MS, issuedAt),
               wsTicket: generateWsTicket(jobId),
+              expiresAt: issuedAt + JOB_TTL_MS,
             },
             { status: 202 },
           ),

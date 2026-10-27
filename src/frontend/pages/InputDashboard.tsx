@@ -24,6 +24,7 @@ interface InputDashboardProps {
     payload: DiagnoseRequest,
     token: string,
     wsTicket: string,
+    expiresAt?: number,
   ) => void;
 }
 
@@ -185,9 +186,10 @@ export const InputDashboard = forwardRef<
         conversationTranscript: transcript,
         labResults,
       };
-      const { jobId, token, wsTicket } = await submitDiagnosis(payload);
+      const { jobId, token, wsTicket, expiresAt } =
+        await submitDiagnosis(payload);
       clearDraft();
-      onSubmit(jobId, payload, token, wsTicket);
+      onSubmit(jobId, payload, token, wsTicket, expiresAt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Submission failed");
     } finally {

@@ -1,5 +1,7 @@
 export const JOB_CREDENTIALS_STORAGE_KEY = "ddx_job_credentials";
-export const JOB_CREDENTIAL_TTL_MS = 60 * 60 * 1000;
+// Fallback only for responses from an older server that omits expiresAt;
+// the server is the source of truth for credential expiry (JOB_TTL_MS).
+const FALLBACK_CREDENTIAL_TTL_MS = 60 * 60 * 1000;
 
 interface StoredCredential {
   jobId: string;
@@ -76,13 +78,14 @@ export function storeJobCredential(
   jobId: string,
   token: string,
   wsTicket: string = "",
+  expiresAt?: number,
   now = Date.now(),
 ): StoredCredential {
   const credential = {
     jobId,
     token,
     wsTicket,
-    expiresAt: now + JOB_CREDENTIAL_TTL_MS,
+    expiresAt: expiresAt ?? now + FALLBACK_CREDENTIAL_TTL_MS,
   };
   const store = loadStore();
   store.jobs[jobId] = credential;

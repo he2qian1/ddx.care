@@ -190,8 +190,9 @@ function App() {
       payload: DiagnoseRequest,
       token: string,
       wsTicket: string,
+      expiresAt?: number,
     ) => {
-      const credential = storeJobCredential(jobId, token, wsTicket);
+      const credential = storeJobCredential(jobId, token, wsTicket, expiresAt);
       dispatch({ type: "register", ...credential, payload });
       navigate({ screen: "waiting", jobId });
     },
@@ -286,6 +287,7 @@ function App() {
         response.jobId,
         response.token,
         response.wsTicket,
+        response.expiresAt,
       );
       dispatch({
         type: "register",
