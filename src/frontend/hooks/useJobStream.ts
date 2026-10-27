@@ -117,6 +117,9 @@ export function useJobStream(
       const wsUrl = `${protocol}//${window.location.host}/ws?jobId=${encodeURIComponent(jobId)}${credParam}`;
 
       ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        retryCount = 0;
+      };
       ws.onmessage = (event) => {
         if (cancelled) return;
         try {

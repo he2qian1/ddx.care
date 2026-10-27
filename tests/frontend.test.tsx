@@ -1156,6 +1156,52 @@ describe("useJobStream", () => {
     vi.useRealTimers();
   });
 
+  test("resets backoff after a successful reconnect (onopen)", async () => {
+    vi.useFakeTimers();
+
+    renderHook(() => useJobStream("job-retry-reset"));
+
+    // Initial connection auto-opens (MockWebSocket fires onopen on a 0ms tick)
+    await hookAct(async () => {
+      vi.advanceTimersByTime(10);
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    // Abnormal close: first retry is scheduled at 1000ms (2^0 * 1000) and
+    // the retry counter rises to 1.
+    await hookAct(async () => {
+      MockWebSocket.instances[0].simulateClose(1006, "Abnormal");
+    });
+    await hookAct(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    // The reconnect succeeds: let its auto-open tick fire, which must reset
+    // the retry counter. If it is not reset, the next close backs off to
+    // 2000ms (2^1 * 1000) instead of restarting at 1000ms.
+    await hookAct(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    await hookAct(async () => {
+      MockWebSocket.instances[1].simulateClose(1006, "Abnormal");
+    });
+
+    // 999ms is not enough for either delay; the socket must appear at
+    // 1000ms (reset), not only at 2000ms (not reset).
+    await hookAct(async () => {
+      vi.advanceTimersByTime(999);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+    await hookAct(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(MockWebSocket.instances).toHaveLength(3);
+
+    vi.useRealTimers();
+  });
+
   test("first connection uses the wsTicket; reconnects fall back to the token", async () => {
     vi.useFakeTimers();
 
