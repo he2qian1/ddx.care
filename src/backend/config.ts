@@ -108,11 +108,6 @@ export const AUDIT_LOG_REDACT_TOOL_ARGS =
   process.env.AUDIT_LOG_REDACT_TOOL_ARGS !== "0";
 
 export function validateConfig() {
-  if (!process.env.OLLAMA_API_KEY && process.env.MOCK_LLM !== "1") {
-    throw new Error(
-      "Missing OLLAMA_API_KEY environment variable. It must be set unless MOCK_LLM=1 is used.",
-    );
-  }
   if (Number.isNaN(PORT) || PORT <= 0 || PORT > 65535) {
     throw new Error(
       `Invalid PORT: ${process.env.PORT}. Must be a positive number between 1 and 65535.`,
@@ -218,6 +213,20 @@ export function validateConfig() {
   if (Number.isNaN(TOOL_CACHE_TTL_MS) || TOOL_CACHE_TTL_MS < 0) {
     throw new Error(
       `Invalid TOOL_CACHE_TTL_MS: ${process.env.TOOL_CACHE_TTL_MS}. Must be a non-negative number. Set to 0 to disable tool caching.`,
+    );
+  }
+  // Provider key check runs last so numeric/range errors are reported first,
+  // and OLLAMA_API_KEY is required only when a configured model uses Ollama.
+  const usesOllama = [SPECIALIST_MODEL, ORCHESTRATOR_MODEL].some((model) =>
+    model.startsWith("ollama-cloud/"),
+  );
+  if (
+    usesOllama &&
+    !process.env.OLLAMA_API_KEY &&
+    process.env.MOCK_LLM !== "1"
+  ) {
+    throw new Error(
+      "Missing OLLAMA_API_KEY environment variable. It must be set unless MOCK_LLM=1 is used.",
     );
   }
 }

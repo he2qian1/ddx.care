@@ -202,3 +202,31 @@ describe("Config — retention/timeout relationship validation", () => {
     }
   });
 });
+describe("Config — provider-aware OLLAMA_API_KEY requirement", () => {
+  test("passes without OLLAMA_API_KEY when models use a non-Ollama provider", async () => {
+    const keys = [
+      "OLLAMA_API_KEY",
+      "MOCK_LLM",
+      "SPECIALIST_MODEL",
+      "ORCHESTRATOR_MODEL",
+    ] as const;
+    const saved: Record<string, string | undefined> = {};
+    for (const k of keys) saved[k] = process.env[k];
+    delete process.env.OLLAMA_API_KEY;
+    process.env.MOCK_LLM = "0";
+    process.env.SPECIALIST_MODEL = "openai/gpt-4o";
+    process.env.ORCHESTRATOR_MODEL = "openai/gpt-4o";
+    try {
+      const mod = await import(
+        `../src/backend/config?t=${Date.now()}-${Math.random()}`
+      );
+      expect(mod.SPECIALIST_MODEL).toBe("openai/gpt-4o");
+      expect(() => mod.validateConfig()).not.toThrow();
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
+});
